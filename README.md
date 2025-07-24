@@ -1,6 +1,6 @@
-# TCS Financial Forecasting Agent
+# Financial Forecasting Agent
 
-An intelligent AI agent system that analyzes Tata Consultancy Services (TCS) financial documents and earnings transcripts to generate comprehensive business outlook forecasts. Built with FastAPI, LangChain, and multiple specialized AI tools for automated financial analysis.
+An intelligent AI agent system that analyzes a corporate financial documents and earnings transcripts to generate comprehensive business outlook forecasts. Built with FastAPI, LangChain, and multiple specialized AI tools for automated financial analysis.
 
 ## Project Overview
 
