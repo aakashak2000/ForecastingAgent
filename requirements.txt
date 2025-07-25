@@ -1,0 +1,35 @@
+# Core framework
+fastapi
+uvicorn
+pydantic
+
+# LangChain ecosystem  
+langchain
+langchain-core
+langchain-ollama
+langchain-openai
+langchain-anthropic
+langchain-community
+langchain-huggingface
+
+# Document processing
+pdfplumber
+PyMuPDF
+requests
+beautifulsoup4
+
+# Vector storage & embeddings
+chromadb
+sentence-transformers
+
+# Data processing
+pandas
+python-dateutil
+
+# Database
+sqlalchemy
+pymysql
+
+# Development
+python-dotenv
+
