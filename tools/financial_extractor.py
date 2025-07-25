@@ -39,3 +39,4 @@ class FinancialDataExtractorTool(BaseTool):
 
     def __init__(self, llm, **kwargs):
         super().__init__(llm=llm, **kwargs)
+        
