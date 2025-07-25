@@ -119,7 +119,10 @@ class ScreenerDataDownloader:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             
-            temp_dir = tempfile.gettempdir()
+            #temp_dir = tempfile.gettempdir()
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            temp_dir = os.path.join(project_root, "temp_downloads")
+            os.makedirs(temp_dir, exist_ok=True) 
             safe_description = "".join(c for c in description if c.isalnum() or c in "._- ")[:30]
             filename = f"{safe_description}_{uuid.uuid4().hex[:8]}.pdf"
             file_path = os.path.join(temp_dir, filename)
@@ -160,7 +163,10 @@ class ScreenerDataDownloader:
         try:
             import pdfplumber
             
-            temp_dir = tempfile.gettempdir()
+            #temp_dir = tempfile.gettempdir()
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            temp_dir = os.path.join(project_root, "temp_downloads")
+            os.makedirs(temp_dir, exist_ok=True) 
             temp_pdf = os.path.join(temp_dir, f"transcript_{uuid.uuid4().hex[:8]}.pdf")
             
             with open(temp_pdf, 'wb') as f:
