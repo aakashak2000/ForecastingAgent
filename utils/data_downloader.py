@@ -121,8 +121,8 @@ class ScreenerDataDownloader:
             
             #temp_dir = tempfile.gettempdir()
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            temp_dir = os.path.join(project_root, "temp_downloads")
-            os.makedirs(temp_dir, exist_ok=True) 
+            temp_dir = os.path.join(project_root, "data", "downloads")
+            os.makedirs(temp_dir, exist_ok=True)
             safe_description = "".join(c for c in description if c.isalnum() or c in "._- ")[:30]
             filename = f"{safe_description}_{uuid.uuid4().hex[:8]}.pdf"
             file_path = os.path.join(temp_dir, filename)
@@ -163,10 +163,7 @@ class ScreenerDataDownloader:
         try:
             import pdfplumber
             
-            #temp_dir = tempfile.gettempdir()
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            temp_dir = os.path.join(project_root, "temp_downloads")
-            os.makedirs(temp_dir, exist_ok=True) 
+            temp_dir = tempfile.gettempdir()
             temp_pdf = os.path.join(temp_dir, f"transcript_{uuid.uuid4().hex[:8]}.pdf")
             
             with open(temp_pdf, 'wb') as f:
@@ -174,17 +171,48 @@ class ScreenerDataDownloader:
             
             transcript_text = ""
             with pdfplumber.open(temp_pdf) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        transcript_text += page_text + "\n"
+                logger.info(f"Extracting text from {len(pdf.pages)} pages")
+                
+                for i, page in enumerate(pdf.pages):
+                    try:
+                        page_text = page.extract_text()
+                        if page_text:
+                            # Clean up text
+                            cleaned_text = page_text.strip()
+                            if cleaned_text:
+                                transcript_text += cleaned_text + "\n\n"
+                                
+                        # Log progress every 10 pages
+                        if (i + 1) % 10 == 0:
+                            logger.debug(f"Processed {i + 1}/{len(pdf.pages)} pages")
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to extract page {i + 1}: {e}")
+                        continue
             
             os.remove(temp_pdf)
             
-            if len(transcript_text) < 500:
+            # Validate extraction quality
+            if len(transcript_text) < 1000:
+                logger.warning(f"Extracted text too short: {len(transcript_text)} chars")
                 return None
             
-            logger.info(f"PDF transcript extracted: {len(transcript_text)} characters")
+            # Check for actual transcript content (not just admin letters)
+            content_lower = transcript_text.lower()
+            transcript_indicators = [
+                'earnings call', 'conference call', 'q&a', 'question', 'analyst',
+                'management', 'ceo', 'cfo', 'operator', 'good morning', 'thank you'
+            ]
+            
+            indicator_count = sum(1 for indicator in transcript_indicators 
+                                if indicator in content_lower)
+            
+            if indicator_count < 3:
+                logger.warning("Content may be administrative document, not transcript")
+                # Still return it, but log the concern
+            
+            logger.info(f"PDF transcript extracted: {len(transcript_text)} characters "
+                       f"from {len(pdf.pages)} pages")
             return transcript_text
             
         except ImportError:
