@@ -1,3 +1,4 @@
+import re
 import logging
 import hashlib
 from typing import List, Dict, Optional, Tuple
@@ -10,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 class TranscriptVectorStore:
     """
-    Manages vector storage and semantic search for earnings call transcripts
+    Enhanced vector storage and semantic search for earnings call transcripts
     """
     
-    def __init__(self, persist_directory: str = "vector_store_data"):
+    def __init__(self, persist_directory: str = "data/vector_store"):
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(exist_ok=True)
         
@@ -48,10 +49,15 @@ class TranscriptVectorStore:
     def add_transcript(self, transcript_text: str, company_symbol: str, 
                       transcript_date: str, source_info: Dict = None) -> int:
         """
-        Add transcript to vector store by chunking and embedding
+        Add transcript to vector store with enhanced chunking and quality control
         
         Returns: Number of chunks added
         """
+        # Validate input quality
+        if len(transcript_text) < 2000:
+            logger.warning(f"Transcript too short for {company_symbol}: {len(transcript_text)} chars")
+            return 0
+        
         # Create unique document ID
         doc_id = f"{company_symbol}_{transcript_date}"
         doc_hash = hashlib.md5(transcript_text.encode()).hexdigest()[:8]
@@ -65,9 +71,14 @@ class TranscriptVectorStore:
         except Exception:
             pass  # Document doesn't exist, proceed with adding
         
-        # Chunk transcript into manageable pieces
-        chunks = self._chunk_transcript(transcript_text, company_symbol, transcript_date)
-        logger.info(f"Created {len(chunks)} chunks from transcript")
+        # Enhanced chunking for better retrieval
+        chunks = self._enhanced_transcript_chunking(transcript_text, company_symbol, transcript_date)
+        
+        if not chunks:
+            logger.warning(f"No quality chunks created from transcript for {company_symbol}")
+            return 0
+        
+        logger.info(f"Created {len(chunks)} quality chunks from transcript")
         
         # Generate embeddings
         chunk_texts = [chunk['text'] for chunk in chunks]
@@ -84,7 +95,8 @@ class TranscriptVectorStore:
                 'chunk_index': i,
                 'chunk_type': chunk['type'],
                 'speaker': chunk.get('speaker', 'unknown'),
-                'doc_hash': doc_hash
+                'doc_hash': doc_hash,
+                'quality_score': chunk.get('quality_score', 0.5)
             }
             if source_info:
                 metadata.update(source_info)
@@ -98,88 +110,205 @@ class TranscriptVectorStore:
             ids=ids
         )
         
-        logger.info(f"Added {len(chunks)} chunks to vector store for {doc_id}")
+        logger.info(f"Added {len(chunks)} quality chunks to vector store for {doc_id}")
         return len(chunks)
     
-    def _chunk_transcript(self, transcript: str, company: str, date: str) -> List[Dict]:
+    def _enhanced_transcript_chunking(self, transcript: str, company: str, date: str) -> List[Dict]:
         """
-        Intelligent chunking of transcript into meaningful segments
+        Enhanced intelligent chunking for better semantic retrieval
         """
         chunks = []
+        
+        # Clean and normalize transcript
+        transcript = self._clean_transcript_text(transcript)
         lines = transcript.split('\n')
+        
         current_chunk = []
         current_speaker = None
-        chunk_type = 'general'
+        current_section = 'general'
         
         for line in lines:
             line = line.strip()
-            if not line:
+            if not line or len(line) < 10:  # Skip very short lines
                 continue
             
-            # Detect speaker changes (common patterns in transcripts)
-            speaker_patterns = [
-                'Operator:', 'CEO:', 'CFO:', 'Analyst:', 'Management:',
-                ':', ' - ', 'Question:', 'Answer:'
-            ]
+            # Enhanced speaker detection
+            speaker_change = self._detect_speaker_change(line)
+            section_change = self._detect_section_change(line)
             
-            is_speaker_line = any(pattern in line for pattern in speaker_patterns)
+            # Create chunk when context changes or reaches optimal size
+            should_chunk = (
+                (speaker_change or section_change) and len(current_chunk) > 0
+            ) or len(current_chunk) > 20  # Larger chunks for better context
             
-            # Detect section changes
-            section_keywords = [
-                'financial highlights', 'business update', 'outlook', 
-                'guidance', 'q&a', 'questions', 'closing remarks'
-            ]
-            
-            is_section_change = any(keyword in line.lower() for keyword in section_keywords)
-            
-            # Create chunk when speaker changes or reaches max size
-            if (is_speaker_line or is_section_change or len(current_chunk) > 15) and current_chunk:
+            if should_chunk and current_chunk:
                 chunk_text = ' '.join(current_chunk)
-                if len(chunk_text) > 100:  # Only add substantial chunks
-                    chunks.append({
+                
+                # Quality filtering - only add substantial, meaningful chunks
+                if self._is_quality_chunk(chunk_text):
+                    chunk_info = {
                         'text': chunk_text,
-                        'type': self._classify_chunk_type(chunk_text),
-                        'speaker': current_speaker or 'unknown'
-                    })
+                        'type': self._classify_chunk_content(chunk_text),
+                        'speaker': current_speaker or 'unknown',
+                        'quality_score': self._calculate_chunk_quality(chunk_text)
+                    }
+                    chunks.append(chunk_info)
+                
                 current_chunk = []
             
-            # Update speaker and add line to current chunk
-            if is_speaker_line:
-                current_speaker = line.split(':')[0] if ':' in line else 'speaker'
+            # Update context
+            if speaker_change:
+                current_speaker = self._extract_speaker(line)
+            if section_change:
+                current_section = self._detect_section_change(line)
             
             current_chunk.append(line)
         
         # Add final chunk
         if current_chunk:
             chunk_text = ' '.join(current_chunk)
-            if len(chunk_text) > 100:
+            if self._is_quality_chunk(chunk_text):
                 chunks.append({
                     'text': chunk_text,
-                    'type': self._classify_chunk_type(chunk_text),
-                    'speaker': current_speaker or 'unknown'
+                    'type': self._classify_chunk_content(chunk_text),
+                    'speaker': current_speaker or 'unknown',
+                    'quality_score': self._calculate_chunk_quality(chunk_text)
                 })
         
-        return chunks
+        # Sort by quality and return best chunks
+        chunks.sort(key=lambda x: x['quality_score'], reverse=True)
+        return chunks[:100]  # Limit to top 100 quality chunks
     
-    def _classify_chunk_type(self, text: str) -> str:
-        """Classify chunk based on content"""
+    def _clean_transcript_text(self, text: str) -> str:
+        """Clean and normalize transcript text"""
+        import re
+        
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Remove common transcript artifacts
+        text = re.sub(r'\[.*?\]', '', text)  # Remove bracketed content
+        text = re.sub(r'\(.*?\)', '', text)  # Remove parenthetical content
+        
+        # Normalize speaker indicators
+        text = re.sub(r'([A-Z][a-z]+ [A-Z][a-z]+):', r'\1 -', text)
+        
+        return text.strip()
+    
+    def _detect_speaker_change(self, line: str) -> bool:
+        """Enhanced speaker detection"""
+        speaker_patterns = [
+            r'^[A-Z][a-z]+ [A-Z][a-z]+\s*[-:]',  # Name patterns
+            r'^(CEO|CFO|Analyst|Operator|Management|Moderator)\s*[-:]',
+            r'^[A-Z]{2,}\s*[-:]',  # Acronyms
+        ]
+        
+        return any(re.match(pattern, line, re.IGNORECASE) for pattern in speaker_patterns)
+    
+    def _detect_section_change(self, line: str) -> bool:
+        """Detect section changes in transcript"""
+        section_keywords = [
+            'financial highlights', 'business update', 'outlook', 'guidance',
+            'q&a', 'questions', 'closing remarks', 'opening remarks',
+            'financial results', 'performance review'
+        ]
+        
+        line_lower = line.lower()
+        return any(keyword in line_lower for keyword in section_keywords)
+    
+    def _extract_speaker(self, line: str) -> str:
+        """Extract speaker name from line"""
+        import re
+        
+        patterns = [
+            r'^([A-Z][a-z]+ [A-Z][a-z]+)\s*[-:]',
+            r'^([A-Z]{2,})\s*[-:]',
+            r'^(CEO|CFO|Analyst|Operator|Management)\s*[-:]'
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, line, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        return 'Unknown'
+    
+    def _is_quality_chunk(self, text: str) -> bool:
+        """Determine if chunk meets quality standards"""
+        # Length requirements
+        if len(text) < 150:  # Minimum meaningful length
+            return False
+        
+        if len(text.split()) < 20:  # Minimum word count
+            return False
+        
+        # Content quality indicators
+        financial_keywords = [
+            'revenue', 'profit', 'growth', 'margin', 'outlook', 'guidance',
+            'performance', 'business', 'quarter', 'year', 'expect', 'forecast'
+        ]
+        
+        text_lower = text.lower()
+        keyword_count = sum(1 for keyword in financial_keywords if keyword in text_lower)
+        
+        # Must contain relevant financial/business content
+        return keyword_count >= 2
+    
+    def _classify_chunk_content(self, text: str) -> str:
+        """Enhanced content classification"""
         text_lower = text.lower()
         
-        if any(word in text_lower for word in ['outlook', 'expect', 'forecast', 'guidance', 'going forward']):
-            return 'outlook'
-        elif any(word in text_lower for word in ['risk', 'challenge', 'headwind', 'concern', 'pressure']):
-            return 'risk'
-        elif any(word in text_lower for word in ['opportunity', 'growth', 'expansion', 'investment', 'launch']):
-            return 'opportunity'
-        elif any(word in text_lower for word in ['revenue', 'profit', 'margin', 'financial', 'performance']):
-            return 'financial'
-        else:
-            return 'general'
+        # More precise classification
+        outlook_indicators = ['outlook', 'expect', 'forecast', 'guidance', 'going forward', 'next quarter', 'future']
+        risk_indicators = ['risk', 'challenge', 'headwind', 'concern', 'pressure', 'difficult', 'uncertain']
+        opportunity_indicators = ['opportunity', 'growth', 'expansion', 'investment', 'launch', 'new', 'innovation']
+        financial_indicators = ['revenue', 'profit', 'margin', 'cost', 'expense', 'earnings', 'performance']
         
+        # Score each category
+        outlook_score = sum(1 for word in outlook_indicators if word in text_lower)
+        risk_score = sum(1 for word in risk_indicators if word in text_lower)
+        opportunity_score = sum(1 for word in opportunity_indicators if word in text_lower)
+        financial_score = sum(1 for word in financial_indicators if word in text_lower)
+        
+        # Return highest scoring category
+        scores = {
+            'outlook': outlook_score,
+            'risk': risk_score,
+            'opportunity': opportunity_score,
+            'financial': financial_score
+        }
+        
+        max_category = max(scores, key=scores.get)
+        return max_category if scores[max_category] > 0 else 'general'
+    
+    def _calculate_chunk_quality(self, text: str) -> float:
+        """Calculate quality score for chunk prioritization"""
+        score = 0.0
+        text_lower = text.lower()
+        
+        # Length bonus (optimal range)
+        word_count = len(text.split())
+        if 30 <= word_count <= 100:
+            score += 0.3
+        elif 20 <= word_count <= 150:
+            score += 0.2
+        
+        # Financial relevance
+        financial_terms = ['revenue', 'profit', 'growth', 'margin', 'outlook', 'guidance', 'performance']
+        relevance_score = sum(1 for term in financial_terms if term in text_lower) / len(financial_terms)
+        score += relevance_score * 0.4
+        
+        # Forward-looking content (valuable for forecasting)
+        future_terms = ['expect', 'forecast', 'guidance', 'outlook', 'next', 'future', 'plan', 'will']
+        future_score = sum(1 for term in future_terms if term in text_lower) / len(future_terms)
+        score += future_score * 0.3
+        
+        return min(score, 1.0)  # Cap at 1.0
+    
     def search_transcripts(self, query: str, company_symbol: str = None, 
-                          n_results: int = 5, min_similarity: float = 0.0) -> List[Dict]:  # Changed to 0.0
+                          n_results: int = 5, min_similarity: float = 0.1) -> List[Dict]:
         """
-        Semantic search across transcript chunks
+        Enhanced semantic search with quality filtering
         """
         try:
             # Generate query embedding
@@ -190,86 +319,66 @@ class TranscriptVectorStore:
             if company_symbol:
                 where_filter["company_symbol"] = company_symbol
             
-            # Search vector database
+            # Search with larger initial results for quality filtering
+            search_results = n_results * 3  # Get more results to filter
+            
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=n_results,
+                n_results=search_results,
                 where=where_filter if where_filter else None,
                 include=['documents', 'metadatas', 'distances']
             )
             
-            # Process and filter results with DEBUG logging
+            # Enhanced result processing and quality filtering
             relevant_chunks = []
             
-            if results['ids'] and results['ids'][0]:  # Check if we got results
+            if results['ids'] and results['ids'][0]:
                 logger.info(f"Raw search returned {len(results['ids'][0])} results")
                 
                 for i, chunk_id in enumerate(results['ids'][0]):
                     distance = results['distances'][0][i]
-                    similarity = 1 - distance  # Convert distance to similarity
+                    similarity = 1 - distance
                     
-                    # DEBUG: Log similarity scores
-                    if i < 3:  # Log top 3 for debugging
-                        logger.info(f"Result {i+1}: similarity={similarity:.3f}, distance={distance:.3f}")
+                    # Quality-based filtering
+                    metadata = results['metadatas'][0][i]
+                    quality_score = metadata.get('quality_score', 0.5)
                     
-                    if similarity >= min_similarity:
+                    # Combined score: similarity + quality
+                    combined_score = (similarity * 0.7) + (quality_score * 0.3)
+                    
+                    if similarity >= min_similarity and combined_score > 0.4:
                         relevant_chunks.append({
                             'id': chunk_id,
                             'text': results['documents'][0][i],
-                            'metadata': results['metadatas'][0][i],
+                            'metadata': metadata,
                             'similarity': similarity,
-                            'chunk_type': results['metadatas'][0][i].get('chunk_type', 'general'),
-                            'speaker': results['metadatas'][0][i].get('speaker', 'unknown')
+                            'quality_score': quality_score,
+                            'combined_score': combined_score,
+                            'chunk_type': metadata.get('chunk_type', 'general'),
+                            'speaker': metadata.get('speaker', 'unknown')
                         })
             
-            logger.info(f"Found {len(relevant_chunks)} relevant chunks for query: '{query[:50]}...'")
-            return relevant_chunks
+            # Sort by combined score and return top results
+            relevant_chunks.sort(key=lambda x: x['combined_score'], reverse=True)
+            top_chunks = relevant_chunks[:n_results]
+            
+            logger.info(f"Enhanced search: {len(top_chunks)} quality chunks for '{query[:50]}...'")
+            if top_chunks:
+                logger.info(f"Best result: similarity={top_chunks[0]['similarity']:.3f}, quality={top_chunks[0]['quality_score']:.3f}")
+            
+            return top_chunks
             
         except Exception as e:
-            logger.error(f"Search failed: {e}")
-            return []
-    
-    def search_by_category(self, category: str, company_symbol: str = None, 
-                          n_results: int = 10) -> List[Dict]:
-        """
-        Search for chunks of specific category (outlook, risk, opportunity, etc.)
-        """
-        try:
-            # FIXED: Simple where filter for ChromaDB
-            where_filter = {"chunk_type": category}
-            # Skip company filter for now to test basic functionality
-            
-            results = self.collection.get(
-                where=where_filter,
-                limit=n_results,
-                include=['documents', 'metadatas']
-            )
-            
-            chunks = []
-            if results['ids']:
-                for i, chunk_id in enumerate(results['ids']):
-                    chunks.append({
-                        'id': chunk_id,
-                        'text': results['documents'][i],
-                        'metadata': results['metadatas'][i],
-                        'chunk_type': category,
-                        'similarity': 1.0  # Perfect match by category
-                    })
-            
-            logger.info(f"Found {len(chunks)} chunks for category: {category}")
-            return chunks
-            
-        except Exception as e:
-            logger.error(f"Category search failed: {e}")
+            logger.error(f"Enhanced search failed: {e}")
             return []
     
     def get_management_outlook(self, company_symbol: str, n_results: int = 8) -> List[Dict]:
-        """Get chunks specifically about management outlook and guidance"""
+        """Get enhanced management outlook with quality filtering"""
         outlook_queries = [
-            "management outlook future guidance",
-            "forward looking statements expectations", 
-            "business outlook next quarter year",
-            "growth expectations management guidance"
+            "management outlook future guidance expectations",
+            "forward looking statements business outlook",
+            "next quarter growth expectations guidance",
+            "future performance management expectations"
         ]
         
         all_chunks = []
@@ -277,66 +386,19 @@ class TranscriptVectorStore:
             chunks = self.search_transcripts(
                 query=query, 
                 company_symbol=company_symbol, 
-                n_results=n_results//2
+                n_results=n_results//2,
+                min_similarity=0.1
             )
             all_chunks.extend(chunks)
         
-        # Remove duplicates and sort by similarity
+        # Remove duplicates and sort by combined score
         unique_chunks = {chunk['id']: chunk for chunk in all_chunks}.values()
-        sorted_chunks = sorted(unique_chunks, key=lambda x: x['similarity'], reverse=True)
-        
-        return sorted_chunks[:n_results]
-    
-    def get_risk_factors(self, company_symbol: str, n_results: int = 8) -> List[Dict]:
-        """Get chunks about risks, challenges, and concerns"""
-        risk_queries = [
-            "risks challenges headwinds concerns",
-            "competitive pressure market challenges",
-            "regulatory risks compliance issues",
-            "economic uncertainty market volatility"
-        ]
-        
-        all_chunks = []
-        for query in risk_queries:
-            chunks = self.search_transcripts(
-                query=query,
-                company_symbol=company_symbol,
-                n_results=n_results//2
-            )
-            all_chunks.extend(chunks)
-        
-        # Remove duplicates and get top results
-        unique_chunks = {chunk['id']: chunk for chunk in all_chunks}.values()
-        sorted_chunks = sorted(unique_chunks, key=lambda x: x['similarity'], reverse=True)
-        
-        return sorted_chunks[:n_results]
-    
-    def get_growth_opportunities(self, company_symbol: str, n_results: int = 8) -> List[Dict]:
-        """Get chunks about growth opportunities and investments"""
-        opportunity_queries = [
-            "growth opportunities expansion plans",
-            "new markets investment opportunities", 
-            "technology investments innovation",
-            "strategic initiatives new services"
-        ]
-        
-        all_chunks = []
-        for query in opportunity_queries:
-            chunks = self.search_transcripts(
-                query=query,
-                company_symbol=company_symbol,
-                n_results=n_results//2
-            )
-            all_chunks.extend(chunks)
-        
-        # Remove duplicates and get top results  
-        unique_chunks = {chunk['id']: chunk for chunk in all_chunks}.values()
-        sorted_chunks = sorted(unique_chunks, key=lambda x: x['similarity'], reverse=True)
+        sorted_chunks = sorted(unique_chunks, key=lambda x: x['combined_score'], reverse=True)
         
         return sorted_chunks[:n_results]
     
     def get_collection_stats(self) -> Dict:
-        """Get statistics about the vector store collection"""
+        """Get enhanced statistics about the vector store collection"""
         try:
             count_result = self.collection.count()
             
@@ -346,6 +408,7 @@ class TranscriptVectorStore:
             companies = set()
             chunk_types = {}
             dates = set()
+            quality_scores = []
             
             if sample['metadatas']:
                 for metadata in sample['metadatas']:
@@ -353,15 +416,20 @@ class TranscriptVectorStore:
                     chunk_type = metadata.get('chunk_type', 'unknown')
                     chunk_types[chunk_type] = chunk_types.get(chunk_type, 0) + 1
                     dates.add(metadata.get('transcript_date', 'unknown'))
+                    quality_scores.append(metadata.get('quality_score', 0.5))
+            
+            avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
             
             return {
                 'total_chunks': count_result,
                 'companies': list(companies),
                 'chunk_types': chunk_types,
                 'transcript_dates': list(dates),
-                'collection_name': self.collection_name
+                'collection_name': self.collection_name,
+                'average_quality_score': round(avg_quality, 3),
+                'quality_status': 'high' if avg_quality > 0.7 else 'medium' if avg_quality > 0.5 else 'low'
             }
             
         except Exception as e:
-            logger.error(f"Failed to get collection stats: {e}")
+            logger.error(f"Failed to get enhanced collection stats: {e}")
             return {'error': str(e)}

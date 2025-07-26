@@ -17,6 +17,7 @@ pdfplumber
 PyMuPDF
 requests
 beautifulsoup4
+yfinance
 
 # Vector storage & embeddings
 chromadb
@@ -29,6 +30,8 @@ python-dateutil
 # Database
 sqlalchemy
 pymysql
+aiosqlite
+mysql-connector-python
 
 # Development
 python-dotenv

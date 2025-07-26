@@ -54,3 +54,7 @@ tests/*.txt
 temp/
 *.tmp
 EOF.DS_Store
+.env
+data/
+*.pdf
+__pycache__/
