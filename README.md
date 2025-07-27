@@ -46,14 +46,95 @@ cp .env.example .env
 
 ### 3. Database Setup
 
-```bash
-# Create MySQL database
-mysql -u root -p -e "CREATE DATABASE financial_forecasting;"
+#### MySQL Setup (Recommended)
 
-# Optional: Install Ollama for local LLM (no API keys needed)
-curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull llama3.1:8b
+**Install MySQL:**
+```bash
+# macOS
+brew install mysql
+brew services start mysql
+
+# Ubuntu/Linux
+sudo apt update
+sudo apt install mysql-server
+sudo systemctl start mysql
+
+# Windows
+# Download from https://dev.mysql.com/downloads/mysql/
 ```
+
+**Configure MySQL:**
+```bash
+# Secure installation
+mysql_secure_installation
+
+# Create database and user
+mysql -u root -p
+```
+
+**In MySQL prompt:**
+```sql
+CREATE DATABASE financial_forecasting;
+CREATE USER 'forecast_user'@'localhost' IDENTIFIED BY 'your_secure_password';
+GRANT ALL PRIVILEGES ON financial_forecasting.* TO 'forecast_user'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+**Update .env with your credentials:**
+```bash
+MYSQL_HOST=localhost
+MYSQL_USER=forecast_user
+MYSQL_PASSWORD=your_secure_password
+MYSQL_DATABASE=financial_forecasting
+```
+
+#### LLM Provider Setup
+
+The system supports multiple LLM providers with automatic fallback. Choose your preferred option:
+
+**Option 1: Ollama (Recommended - No API Keys Needed)**
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama service
+ollama serve
+
+# Download model (in another terminal)
+ollama pull llama3.1:8b
+
+# Verify installation
+ollama list
+```
+
+**Option 2: OpenAI (Premium)**
+```bash
+# Get API key from https://platform.openai.com/api-keys
+# Add to .env:
+OPENAI_API_KEY=sk-your-openai-key-here
+```
+
+**Option 3: Anthropic Claude (Premium)**
+```bash
+# Get API key from https://console.anthropic.com/
+# Add to .env:
+ANTHROPIC_API_KEY=your-anthropic-key-here
+```
+
+**Option 4: Hugging Face (Free Tier Available)**
+```bash
+# Get token from https://huggingface.co/settings/tokens
+# Add to .env:
+HUGGINGFACE_API_TOKEN=your-hf-token-here
+```
+
+**LLM Provider Priority:**
+The system automatically tries providers in this order:
+1. **Ollama** (if available) - No API costs
+2. **OpenAI** (if API key provided) - Best performance  
+3. **Anthropic** (if API key provided) - Advanced reasoning
+4. **Hugging Face** (if token provided) - Free tier backup
 
 ### 4. Start the API
 
@@ -179,25 +260,124 @@ curl -X POST 'http://localhost:8000/forecast' \
 
 ### Environment Variables
 
-| Variable | Required | Description | Default |
+Create `.env` file in project root:
+
+```bash
+# Database Configuration (Required)
+MYSQL_HOST=localhost
+MYSQL_USER=forecast_user
+MYSQL_PASSWORD=your_secure_password
+MYSQL_DATABASE=financial_forecasting
+
+# LLM API Keys (Optional - system uses Ollama by default)
+OPENAI_API_KEY=sk-your-openai-key-here
+ANTHROPIC_API_KEY=your-anthropic-key-here
+HUGGINGFACE_API_TOKEN=your-hf-token-here
+
+# Application Settings
+LOG_LEVEL=INFO
+```
+
+### Configuration Reference
+
+| Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `MYSQL_HOST` | Yes | MySQL server host | `localhost` |
-| `MYSQL_USER` | Yes | MySQL username | `root` |
-| `MYSQL_PASSWORD` | Yes | MySQL password | - |
+| `MYSQL_USER` | Yes | MySQL username | `forecast_user` |
+| `MYSQL_PASSWORD` | Yes | MySQL password | `secure_password123` |
 | `MYSQL_DATABASE` | Yes | Database name | `financial_forecasting` |
-| `OPENAI_API_KEY` | No | OpenAI API key | - |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key | - |
-| `HUGGINGFACE_API_TOKEN` | No | HuggingFace token | - |
+| `OPENAI_API_KEY` | No | OpenAI API key | `sk-proj-...` |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key | `sk-ant-...` |
+| `HUGGINGFACE_API_TOKEN` | No | HuggingFace token | `hf_...` |
 | `LOG_LEVEL` | No | Logging level | `INFO` |
 
-### LLM Providers
+### LLM Provider Selection
 
 The system automatically selects the best available LLM provider:
 
-1. **Ollama** (Local, no API key needed) - Default choice
-2. **OpenAI** (Premium, requires API key) - High quality responses  
-3. **Anthropic** (Premium, requires API key) - Advanced reasoning
-4. **Hugging Face** (Free tier available) - Backup option
+1. **Ollama** (Local, no API key needed)
+   - ✅ Free and private
+   - ✅ No rate limits
+   - ✅ Works offline
+   - ❌ Requires local resources
+
+2. **OpenAI** (Premium, requires API key)
+   - ✅ High quality responses
+   - ✅ Fast processing
+   - ❌ API costs apply
+   - ❌ Internet required
+
+3. **Anthropic** (Premium, requires API key)
+   - ✅ Advanced reasoning
+   - ✅ Long context support
+   - ❌ API costs apply
+   - ❌ Internet required
+
+4. **Hugging Face** (Free tier available)
+   - ✅ Free tier available
+   - ✅ Various models
+   - ❌ Rate limits on free tier
+   - ❌ Internet required
+
+## Troubleshooting
+
+### Common Setup Issues
+
+**1. MySQL Connection Failed**
+```bash
+ERROR: MySQL connection failed: Access denied for user 'root'@'localhost'
+```
+**Solution:**
+- Verify MySQL is running: `brew services list | grep mysql` (macOS)
+- Check password in `.env` matches MySQL password
+- Ensure database exists: `mysql -u root -p -e "SHOW DATABASES;"`
+
+**2. Ollama Not Found**
+```bash
+ERROR: No LLM providers available
+```
+**Solution:**
+```bash
+# Check if Ollama is running
+ollama list
+
+# If not installed
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull llama3.1:8b
+
+# Start Ollama service
+ollama serve
+```
+
+**3. PDF Download Fails**
+```bash
+WARNING: Failed to download PDF
+```
+**Solution:**
+- Check internet connection
+- Some PDFs may be temporarily unavailable
+- System will continue with available data sources
+
+**4. Port Already in Use**
+```bash
+ERROR: [Errno 48] Address already in use
+```
+**Solution:**
+```bash
+# Kill existing process
+lsof -ti:8000 | xargs kill -9
+
+# Or use different port
+uvicorn app.main:app --port 8001
+```
+
+### Performance Optimization
+
+**For Better Performance:**
+- Use **Ollama with llama3.1:8b** for fastest local processing
+- Add **OpenAI API key** for best quality responses
+- Ensure **MySQL** is properly indexed (automatic)
+- Use **SSD storage** for faster PDF processing
 
 ## Supported Companies
 
@@ -321,7 +501,7 @@ SELECT COUNT(*) FROM forecast_requests WHERE created_at > NOW() - INTERVAL 1 DAY
 
 ## License
 
-Private commercial software - All rights reserved.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
