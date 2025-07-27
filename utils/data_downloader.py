@@ -254,6 +254,7 @@ class ScreenerDataDownloader:
             'errors': []
         }
         
+        # Download financial reports
         for report in documents['annual_reports'][:max_reports]:
             file_path = self.download_pdf_temp(report['pdf_url'], f"{company_symbol}_annual_{report['year']}")
             if file_path:
@@ -261,18 +262,24 @@ class ScreenerDataDownloader:
             else:
                 results['errors'].append(f"Failed to download: {report['title']}")
         
+        # Download transcripts - FIX THIS SECTION
         for concall in documents['concalls'][:max_transcripts]:
             if concall['transcript_url']:
+                logger.info(f"📝 Extracting transcript from: {concall['date']}")
                 content = self.extract_transcript_content(concall['transcript_url'])
-                if content:
+                if content and len(content) > 1000:  # Quality check
                     results['transcripts'].append({
                         **concall,
-                        'content': content[:1000] + "...",
-                        'full_content': content,
+                        'content': content[:1000] + "...",  # Preview
+                        'full_content': content,            # Complete content
                         'word_count': len(content.split())
                     })
+                    logger.info(f"✅ Transcript extracted: {len(content)} chars, {len(content.split())} words")
                 else:
+                    logger.warning(f"❌ Failed to extract transcript for {concall['date']}")
                     results['errors'].append(f"Failed to extract transcript: {concall['date']}")
+            else:
+                logger.warning(f"❌ No transcript URL for {concall['date']}")
         
         logger.info(f"Complete: {len(results['annual_reports'])} PDFs, {len(results['transcripts'])} transcripts")
         return results

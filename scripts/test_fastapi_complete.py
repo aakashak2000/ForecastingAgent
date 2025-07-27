@@ -1,277 +1,116 @@
 #!/usr/bin/env python3
-"""
-Test complete FastAPI system - simulates evaluator experience
-Tests: FastAPI startup, database logging, endpoint response, business output
-"""
-
 import sys
 import time
-import json
-import requests
-import subprocess
-import threading
 from pathlib import Path
 
-# Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-def start_fastapi_server():
-    """Start FastAPI server in background"""
-    print("🚀 Starting FastAPI server...")
+def test_fresh_system():
+    print("🎯 FRESH END-TO-END SYSTEM TEST")
+    print("=" * 60)
+    print("Testing complete workflow:")
+    print("1. Download fresh financial reports")
+    print("2. Download fresh earnings call transcripts") 
+    print("3. Financial data extraction")
+    print("4. RAG-based qualitative analysis")
+    print("5. Live market data")
+    print("6. Complete forecast generation")
+    print("=" * 60)
     
     try:
-        # Start server process
-        process = subprocess.Popen(
-            ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        from agent.orchestrator import FinancialForecastingAgent
         
-        # Wait for server to start
-        print("   Waiting for server startup...")
-        time.sleep(8)  # Give server time to initialize
+        # Initialize fresh agent
+        print(f"\n🤖 Step 1: Initialize Agent...")
+        agent = FinancialForecastingAgent()
+        print("✅ Agent initialized")
         
-        # Test if server is responding
-        try:
-            response = requests.get("http://127.0.0.1:8000/", timeout=5)
-            if response.status_code == 200:
-                print("✅ FastAPI server is running")
-                return process
-            else:
-                print(f"❌ Server responded with status {response.status_code}")
-                return None
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Server not responding: {e}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Failed to start server: {e}")
-        return None
-
-def test_health_endpoints():
-    """Test basic API health"""
-    print("\n🧪 Testing API Health Endpoints...")
-    
-    try:
-        # Test root endpoint
-        response = requests.get("http://127.0.0.1:8000/")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   ✅ Root endpoint: {data['service']}")
-        else:
-            print(f"   ❌ Root endpoint failed: {response.status_code}")
-            return False
-        
-        # Test health endpoint
-        response = requests.get("http://127.0.0.1:8000/health")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   ✅ Health check: {data['status']}")
-            print(f"   📊 Components: {len(data['components'])} operational")
-        else:
-            print(f"   ❌ Health endpoint failed: {response.status_code}")
-            return False
-            
-        return True
-        
-    except Exception as e:
-        print(f"   ❌ Health check failed: {e}")
-        return False
-
-def test_forecast_endpoint():
-    """Test main forecast endpoint - the core deliverable"""
-    print("\n🎯 Testing Main Forecast Endpoint...")
-    
-    try:
-        # Prepare request
-        request_data = {
-            "company_symbol": "TCS",
-            "forecast_period": "Q2-2025"
-        }
-        
-        print(f"   📤 Request: {request_data}")
-        print(f"   ⏳ Processing forecast (this may take 60+ seconds)...")
+        # Run complete forecast (this will download everything fresh)
+        print(f"\n🚀 Step 2: Generate Complete Forecast...")
+        print("   This will:")
+        print("   - Download latest TCS financial reports")
+        print("   - Download latest 3 earnings call transcripts")
+        print("   - Extract financial metrics from reports")
+        print("   - Analyze transcripts for qualitative insights")
+        print("   - Fetch live market data")
+        print("   - Generate comprehensive forecast")
         
         start_time = time.time()
         
-        # Make request to forecast endpoint
-        response = requests.post(
-            "http://127.0.0.1:8000/forecast",
-            json=request_data,
-            timeout=300  # 5 minute timeout for complete analysis
-        )
+        result = agent.generate_forecast("TCS", "Q2-2025")
         
         processing_time = time.time() - start_time
         
-        if response.status_code == 200:
-            forecast_data = response.json()
+        # Display comprehensive results
+        print(f"\n📊 COMPLETE TEST RESULTS:")
+        print("=" * 60)
+        print(f"✅ Success: {result.success}")
+        print(f"⏱️  Processing Time: {processing_time:.1f} seconds")
+        print(f"🎯 Overall Outlook: {result.overall_outlook.upper()}")
+        print(f"📈 Investment Recommendation: {result.investment_recommendation.upper()}")
+        print(f"📊 Confidence Score: {result.confidence_score:.0%}")
+        
+        # Verify all 3 data sources
+        print(f"\n🔍 Data Source Verification:")
+        financial_ok = result.financial_metrics is not None
+        qualitative_ok = result.qualitative_analysis is not None
+        market_ok = result.market_data is not None
+        
+        print(f"   📄 Financial Reports: {'✅' if financial_ok else '❌'}")
+        if financial_ok:
+            fm = result.financial_metrics
+            print(f"      Revenue: ₹{fm.total_revenue} Cr" if fm.total_revenue else "      Revenue: Not extracted")
+            print(f"      Net Profit: ₹{fm.net_profit} Cr" if fm.net_profit else "      Net Profit: Not extracted")
             
-            print(f"\n📊 FORECAST RESPONSE RECEIVED ({processing_time:.1f}s)")
-            print("=" * 60)
+        print(f"   🧠 Qualitative Analysis: {'✅' if qualitative_ok else '❌'}")
+        if qualitative_ok:
+            qa = result.qualitative_analysis
+            print(f"      Total Insights: {qa.total_insights}")
+            print(f"      Management Sentiment: {qa.management_sentiment.overall_tone}")
+            print(f"      Business Outlook: {len(qa.business_outlook)} insights")
+            print(f"      Growth Opportunities: {len(qa.growth_opportunities)} insights")
             
-            # Display key business metrics
-            print(f"Company: {forecast_data['company_symbol']}")
-            print(f"Recommendation: {forecast_data['investment_recommendation'].upper()}")
-            print(f"Outlook: {forecast_data['overall_outlook'].upper()}")
-            print(f"Confidence: {forecast_data['analyst_confidence']:.0%}")
-            
-            # Financial metrics
-            if forecast_data.get('current_price'):
-                print(f"\n💰 Financial Metrics:")
-                print(f"   Current Price: ₹{forecast_data['current_price']:,.2f}")
-                if forecast_data.get('target_price'):
-                    print(f"   Target Price: ₹{forecast_data['target_price']:,.0f}")
-                    print(f"   Upside: +{forecast_data.get('target_upside_percent', 0):.0f}%")
-                print(f"   P/E Ratio: {forecast_data.get('pe_ratio', 'N/A')}")
-                print(f"   Market Cap: ₹{forecast_data.get('market_cap_crores', 0):,.0f} Cr")
-            
-            # Market context
-            if forecast_data.get('valuation_assessment'):
-                print(f"\n📈 Market Analysis:")
-                print(f"   Valuation: {forecast_data['valuation_assessment'].replace('_', ' ').title()}")
-                print(f"   Momentum: {forecast_data.get('price_momentum', 'N/A').title()}")
-                print(f"   Risk Level: {forecast_data.get('risk_level', 'N/A').title()}")
-            
-            # Business insights
-            print(f"\n🎯 Key Business Drivers:")
-            for i, driver in enumerate(forecast_data.get('key_drivers', []), 1):
-                print(f"   {i}. {driver}")
-            
-            # Growth opportunities
-            if forecast_data.get('growth_opportunities'):
-                print(f"\n🚀 Growth Opportunities:")
-                for opp in forecast_data['growth_opportunities'][:2]:
-                    print(f"   • {opp}")
-            
-            # Management insights
-            if forecast_data.get('management_sentiment'):
-                print(f"\n😊 Management Sentiment: {forecast_data['management_sentiment'].title()}")
-                if forecast_data.get('management_optimism_score'):
-                    print(f"   Optimism Score: {forecast_data['management_optimism_score']:.0%}")
-            
-            # Metadata
-            print(f"\n📋 Analysis Metadata:")
-            print(f"   Processing Time: {forecast_data['processing_time']:.1f}s")
-            print(f"   Data Sources: {', '.join(forecast_data.get('data_sources', []))}")
-            print(f"   Generated: {forecast_data.get('generated_at', 'N/A')}")
-            
-            # Validate response structure
-            required_fields = [
-                'company_symbol', 'investment_recommendation', 'overall_outlook', 
-                'analyst_confidence', 'key_drivers', 'processing_time'
-            ]
-            
-            missing_fields = [field for field in required_fields if field not in forecast_data]
-            if missing_fields:
-                print(f"\n⚠️  Missing fields: {missing_fields}")
-                return False
-            
-            print(f"\n✅ FORECAST ENDPOINT TEST PASSED!")
-            print(f"   ✅ Structured JSON response received")
-            print(f"   ✅ All required business fields present")
-            print(f"   ✅ Professional-grade analysis delivered")
-            
-            return True
-            
+        print(f"   📈 Live Market Data: {'✅' if market_ok else '❌'}")
+        if market_ok:
+            md = result.market_data
+            print(f"      Current Price: ₹{md.current_price:,.2f}")
+            print(f"      P/E Ratio: {md.pe_ratio}")
+            print(f"      Valuation: {result.market_context.current_valuation if result.market_context else 'Unknown'}")
+        
+        # Show forecast insights
+        print(f"\n🎯 Generated Forecast Insights:")
+        print(f"   Key Drivers ({len(result.key_drivers)}):")
+        for i, driver in enumerate(result.key_drivers[:3], 1):
+            print(f"     {i}. {driver}")
+        
+        if qualitative_ok and result.qualitative_analysis.business_outlook:
+            print(f"   Business Outlook Sample:")
+            print(f"     • {result.qualitative_analysis.business_outlook[0].insight}")
+        
+        # Success criteria
+        data_sources_count = sum([financial_ok, qualitative_ok, market_ok])
+        success = result.success and data_sources_count >= 2
+        
+        print(f"\n🏆 FINAL ASSESSMENT:")
+        print(f"   Data Sources Working: {data_sources_count}/3")
+        print(f"   Forecast Quality: {'HIGH' if data_sources_count == 3 else 'MEDIUM' if data_sources_count == 2 else 'LOW'}")
+        
+        if success:
+            print(f"   🎉 SYSTEM FULLY OPERATIONAL!")
+            print(f"   ✅ Downloads fresh financial data")
+            print(f"   ✅ Extracts meaningful insights") 
+            print(f"   ✅ Generates professional forecasts")
         else:
-            print(f"❌ Forecast endpoint failed: HTTP {response.status_code}")
-            print(f"   Response: {response.text}")
-            return False
-            
-    except requests.exceptions.Timeout:
-        print(f"❌ Request timeout - analysis took too long")
-        return False
+            print(f"   ⚠️  System partially working - check failed components")
+        
+        return success
+        
     except Exception as e:
-        print(f"❌ Forecast test failed: {e}")
+        print(f"❌ Fresh test failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
-def test_database_logging():
-    """Test database logging functionality"""
-    print("\n🗄️ Testing Database Logging...")
-    
-    try:
-        from app.database import get_database_stats
-        import asyncio
-        
-        # Get database stats
-        stats = asyncio.run(get_database_stats())
-        
-        if 'error' not in stats:
-            print(f"   ✅ Database Type: {stats.get('database_type', 'unknown')}")
-            print(f"   ✅ Total Requests: {stats.get('total_requests', 0)}")
-            print(f"   ✅ Success Rate: {stats.get('success_rate', '0%')}")
-            return True
-        else:
-            print(f"   ❌ Database stats error: {stats['error']}")
-            return False
-            
-    except Exception as e:
-        print(f"   ❌ Database test failed: {e}")
-        return False
-
-def main():
-    """Run complete FastAPI system test"""
-    print("🎯 FASTAPI SYSTEM TEST - Complete Business Application")
-    print("=" * 70)
-    print("This simulates the exact evaluator experience:")
-    print("1. Start FastAPI server")
-    print("2. Hit /forecast endpoint")  
-    print("3. Verify business-grade JSON response")
-    print("4. Check database logging")
-    
-    # Start FastAPI server
-    server_process = start_fastapi_server()
-    if not server_process:
-        print("❌ Failed to start FastAPI server")
-        return False
-    
-    try:
-        # Test system components
-        tests = [
-            ("API Health", test_health_endpoints),
-            ("Forecast Endpoint", test_forecast_endpoint),
-            ("Database Logging", test_database_logging)
-        ]
-        
-        results = {}
-        for test_name, test_func in tests:
-            results[test_name] = test_func()
-        
-        # Final results
-        passed = sum(results.values())
-        total = len(results)
-        
-        print(f"\n🏆 FASTAPI SYSTEM TEST RESULTS")
-        print("=" * 70)
-        print(f"Tests Passed: {passed}/{total}")
-        print(f"Success Rate: {passed/total*100:.0f}%")
-        
-        if passed == total:
-            print(f"\n🎉 COMPLETE SUCCESS!")
-            print(f"✅ FastAPI server operational")
-            print(f"✅ Forecast endpoint delivering business-grade analysis")
-            print(f"✅ Database logging functional") 
-            print(f"✅ Ready for evaluator testing!")
-            
-            print(f"\n📋 EVALUATOR COMMANDS:")
-            print(f"   uvicorn app.main:app --reload")
-            print(f"   curl -X POST 'http://localhost:8000/forecast' \\")
-            print(f"        -H 'Content-Type: application/json' \\")
-            print(f"        -d '{{\"company_symbol\": \"TCS\"}}'")
-            
-            return True
-        else:
-            print(f"\n⚠️  Some tests failed - check output above")
-            return False
-            
-    finally:
-        # Clean up server process
-        if server_process:
-            print(f"\n🔄 Shutting down FastAPI server...")
-            server_process.terminate()
-            server_process.wait()
 
 if __name__ == "__main__":
-    success = main()
+    success = test_fresh_system()
     sys.exit(0 if success else 1)

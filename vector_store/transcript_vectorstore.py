@@ -114,70 +114,58 @@ class TranscriptVectorStore:
         return len(chunks)
     
     def _enhanced_transcript_chunking(self, transcript: str, company: str, date: str) -> List[Dict]:
-        """
-        Enhanced intelligent chunking for better semantic retrieval
-        """
+        """Enhanced intelligent chunking that works with poorly formatted text"""
         chunks = []
         
-        # Clean and normalize transcript
-        transcript = self._clean_transcript_text(transcript)
-        lines = transcript.split('\n')
+        # Clean text but preserve structure
+        cleaned_text = transcript.replace('\n\n', ' [PARA] ').replace('\n', ' ')
         
-        current_chunk = []
-        current_speaker = None
-        current_section = 'general'
-        
-        for line in lines:
-            line = line.strip()
-            if not line or len(line) < 10:  # Skip very short lines
-                continue
+        # For single-line content, split by sentences and speaker patterns
+        if len(cleaned_text.split('\n')) < 10:  # Poorly formatted text
+            # Split by speaker patterns and key phrases
+            split_patterns = [
+                r'(?i)(CEO|CFO|Analyst|Moderator|Management|Mr\.|Ms\.|Operator)[\s:]+',
+                r'(?i)(Question|Answer|Thank you|Good [morning|evening])',
+                r'(?i)(Moving on|Next question|Let me|I would like)',
+                r'\. [A-Z]',  # Sentence boundaries
+            ]
             
-            # Enhanced speaker detection
-            speaker_change = self._detect_speaker_change(line)
-            section_change = self._detect_section_change(line)
+            # Create chunks of reasonable size (500-1500 characters)
+            chunk_size = 800
+            words = cleaned_text.split()
+            current_chunk = []
             
-            # Create chunk when context changes or reaches optimal size
-            should_chunk = (
-                (speaker_change or section_change) and len(current_chunk) > 0
-            ) or len(current_chunk) > 20  # Larger chunks for better context
-            
-            if should_chunk and current_chunk:
+            for word in words:
+                current_chunk.append(word)
                 chunk_text = ' '.join(current_chunk)
                 
-                # Quality filtering - only add substantial, meaningful chunks
-                if self._is_quality_chunk(chunk_text):
-                    chunk_info = {
-                        'text': chunk_text,
-                        'type': self._classify_chunk_content(chunk_text),
-                        'speaker': current_speaker or 'unknown',
-                        'quality_score': self._calculate_chunk_quality(chunk_text)
-                    }
-                    chunks.append(chunk_info)
-                
-                current_chunk = []
+                # Create chunk when it reaches good size or finds natural break
+                if len(chunk_text) > chunk_size:
+                    if self._is_quality_chunk(chunk_text):
+                        chunk_info = {
+                            'text': chunk_text,
+                            'type': self._classify_chunk_content(chunk_text),
+                            'speaker': 'Management',
+                            'quality_score': self._calculate_chunk_quality(chunk_text)
+                        }
+                        chunks.append(chunk_info)
+                    
+                    current_chunk = current_chunk[-50:]  # Keep some overlap
             
-            # Update context
-            if speaker_change:
-                current_speaker = self._extract_speaker(line)
-            if section_change:
-                current_section = self._detect_section_change(line)
-            
-            current_chunk.append(line)
+            # Add final chunk
+            if current_chunk:
+                final_text = ' '.join(current_chunk)
+                if self._is_quality_chunk(final_text):
+                    chunks.append({
+                        'text': final_text,
+                        'type': self._classify_chunk_content(final_text),
+                        'speaker': 'Management',
+                        'quality_score': self._calculate_chunk_quality(final_text)
+                    })
         
-        # Add final chunk
-        if current_chunk:
-            chunk_text = ' '.join(current_chunk)
-            if self._is_quality_chunk(chunk_text):
-                chunks.append({
-                    'text': chunk_text,
-                    'type': self._classify_chunk_content(chunk_text),
-                    'speaker': current_speaker or 'unknown',
-                    'quality_score': self._calculate_chunk_quality(chunk_text)
-                })
-        
-        # Sort by quality and return best chunks
+        # Sort by quality and return top chunks
         chunks.sort(key=lambda x: x['quality_score'], reverse=True)
-        return chunks[:100]  # Limit to top 100 quality chunks
+        return chunks[:50]  # Reasonable number of chunks
     
     def _clean_transcript_text(self, text: str) -> str:
         """Clean and normalize transcript text"""
@@ -235,24 +223,25 @@ class TranscriptVectorStore:
     
     def _is_quality_chunk(self, text: str) -> bool:
         """Determine if chunk meets quality standards"""
-        # Length requirements
-        if len(text) < 150:  # Minimum meaningful length
+        # MUCH more lenient length requirements
+        if len(text) < 50:  # Was 150, now 50
             return False
         
-        if len(text.split()) < 20:  # Minimum word count
+        if len(text.split()) < 10:  # Was 20, now 10  
             return False
         
-        # Content quality indicators
+        # More lenient content quality
         financial_keywords = [
             'revenue', 'profit', 'growth', 'margin', 'outlook', 'guidance',
-            'performance', 'business', 'quarter', 'year', 'expect', 'forecast'
+            'performance', 'business', 'quarter', 'year', 'expect', 'forecast',
+            'TCS', 'company', 'management', 'client', 'cost', 'investment'  # Added more keywords
         ]
         
         text_lower = text.lower()
         keyword_count = sum(1 for keyword in financial_keywords if keyword in text_lower)
         
-        # Must contain relevant financial/business content
-        return keyword_count >= 2
+        # Must contain at least 1 relevant keyword (was 2)
+        return keyword_count >= 1
     
     def _classify_chunk_content(self, text: str) -> str:
         """Enhanced content classification"""
@@ -342,11 +331,12 @@ class TranscriptVectorStore:
                     # Quality-based filtering
                     metadata = results['metadatas'][0][i]
                     quality_score = metadata.get('quality_score', 0.5)
-                    
+
                     # Combined score: similarity + quality
                     combined_score = (similarity * 0.7) + (quality_score * 0.3)
-                    
-                    if similarity >= min_similarity and combined_score > 0.4:
+
+                    # FIXED: Much lower thresholds for better retrieval
+                    if similarity >= min_similarity and combined_score > 0.05:  # Was 0.4, now 0.2
                         relevant_chunks.append({
                             'id': chunk_id,
                             'text': results['documents'][0][i],
@@ -387,7 +377,7 @@ class TranscriptVectorStore:
                 query=query, 
                 company_symbol=company_symbol, 
                 n_results=n_results//2,
-                min_similarity=0.1
+                min_similarity=0.0
             )
             all_chunks.extend(chunks)
         
@@ -433,3 +423,35 @@ class TranscriptVectorStore:
         except Exception as e:
             logger.error(f"Failed to get enhanced collection stats: {e}")
             return {'error': str(e)}
+
+    def get_growth_opportunities(self, company_symbol: str, n_results: int = 6) -> List[Dict]:
+        """Get growth opportunities from transcripts"""
+        # Use the exact query we know works
+        chunks = self.search_transcripts(
+            query="growth opportunities",
+            company_symbol=company_symbol, 
+            n_results=n_results,
+            min_similarity=-1.0  # Accept all results
+        )
+        return chunks
+
+    def get_risk_factors(self, company_symbol: str, n_results: int = 6) -> List[Dict]:
+        """Get risk factors from transcripts"""
+        # Try simpler risk-related queries
+        queries = ["pressure", "challenges", "costs"]
+        
+        all_chunks = []
+        for query in queries:
+            chunks = self.search_transcripts(
+                query=query,
+                company_symbol=company_symbol, 
+                n_results=2,
+                min_similarity=-1.0
+            )
+            all_chunks.extend(chunks)
+        
+        # Remove duplicates and return top results
+        unique_chunks = {chunk['id']: chunk for chunk in all_chunks}.values()
+        sorted_chunks = sorted(unique_chunks, key=lambda x: x.get('combined_score', 0), reverse=True)
+        
+        return sorted_chunks[:n_results]

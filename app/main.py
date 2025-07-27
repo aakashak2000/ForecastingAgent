@@ -25,78 +25,12 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_database()
     
-    # Auto-setup RAG data if needed
-    await setup_rag_data_if_needed()
-    
     logger.info("✅ Financial Forecasting Agent API started successfully")
     
     yield
     
     # Shutdown
     logger.info("🔄 Shutting down Financial Forecasting Agent...")
-
-async def setup_rag_data_if_needed():
-    """Automatically download and setup quality RAG data for major companies"""
-    try:
-        from vector_store.transcript_vectorstore import TranscriptVectorStore
-        from utils.data_downloader import ScreenerDataDownloader
-        
-        # Check if vector store has quality data
-        vectorstore = TranscriptVectorStore(persist_directory="data/vector_store")
-        stats = vectorstore.get_collection_stats()
-        
-        if stats.get('total_chunks', 0) > 50:  # Require substantial data
-            logger.info(f"✅ Quality RAG data exists: {stats['total_chunks']} chunks, avg quality: {stats.get('average_quality_score', 0):.3f}")
-            return
-        
-        logger.info("🔄 Setting up quality RAG data for major companies...")
-        
-        # Setup data for major companies to ensure evaluator can test any of them
-        major_companies = ["TCS", "INFY", "RELIANCE"]
-        downloader = ScreenerDataDownloader()
-        total_chunks_all = 0
-        
-        for company in major_companies:
-            try:
-                logger.info(f"📥 Downloading {company} transcript data...")
-                results = downloader.get_latest_documents(company, max_reports=0, max_transcripts=3)
-                
-                company_chunks = 0
-                if results['transcripts']:
-                    for transcript in results['transcripts']:
-                        content = transcript.get('full_content', transcript.get('content', ''))
-                        if len(content) > 2000:  # Quality threshold
-                            chunks_added = vectorstore.add_transcript(
-                                transcript_text=content,
-                                company_symbol=company,
-                                transcript_date=transcript['date'],
-                                source_info={'source': 'earnings_call', 'startup_setup': True}
-                            )
-                            company_chunks += chunks_added
-                            total_chunks_all += chunks_added
-                
-                if company_chunks > 0:
-                    logger.info(f"✅ {company}: {company_chunks} quality chunks added")
-                else:
-                    logger.warning(f"⚠️ {company}: No quality transcript data found")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to setup {company}: {e}")
-                continue
-        
-        # Final quality check
-        final_stats = vectorstore.get_collection_stats()
-        if total_chunks_all > 0:
-            logger.info(f"✅ Quality RAG setup complete:")
-            logger.info(f"   Total chunks: {final_stats.get('total_chunks', 0)}")
-            logger.info(f"   Companies: {final_stats.get('companies', [])}")
-            logger.info(f"   Average quality: {final_stats.get('average_quality_score', 0):.3f}")
-            logger.info(f"   Quality status: {final_stats.get('quality_status', 'unknown')}")
-        else:
-            logger.warning("⚠️ Quality RAG setup failed - will use market data analysis only")
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Auto RAG setup failed: {e} - will continue with market analysis only")
 
 # Create FastAPI app with lifespan
 app = FastAPI(

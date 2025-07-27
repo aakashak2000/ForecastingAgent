@@ -100,7 +100,7 @@ class FinancialForecastingAgent:
             # Download fresh financial reports
             from utils.data_downloader import ScreenerDataDownloader
             downloader = ScreenerDataDownloader()
-            results = downloader.get_latest_documents(company_symbol, max_reports=2, max_transcripts=0)
+            results = downloader.get_latest_documents(company_symbol, max_reports=2, max_transcripts=4)
             
             if not results['annual_reports']:
                 logger.warning(f"No financial reports found for {company_symbol}")
@@ -132,22 +132,27 @@ class FinancialForecastingAgent:
             return None
     
     def _get_qualitative_insights(self, company_symbol: str):
-        """Get qualitative analysis with automatic transcript download"""
+        """Get qualitative analysis using already downloaded transcripts"""
         try:
-            logger.info("Ensuring transcript data availability...")
+            logger.info("Analyzing earnings call transcripts...")
             
-            # Check if we have transcript data
+            # Check if we have sufficient transcript data already
             stats = self.qualitative_analyzer.vectorstore.get_collection_stats()
             companies = stats.get('companies', [])
             
-            if company_symbol not in companies:
-                logger.info(f"Downloading transcript data for {company_symbol}...")
-                success = self._download_company_transcripts(company_symbol)
-                if not success:
-                    logger.warning(f"Could not download transcript data for {company_symbol}")
-                    return None
+            if company_symbol in companies:
+                try:
+                    test_results = self.qualitative_analyzer.vectorstore.search_transcripts(
+                        "test", company_symbol, n_results=5, min_similarity=-1.0
+                    )
+                    if len(test_results) >= 10:  # Have enough data
+                        logger.info(f"✅ Using existing transcript data for {company_symbol}")
+                    else:
+                        logger.info(f"⚠️  Limited transcript data for {company_symbol}, but continuing...")
+                except:
+                    logger.info(f"⚠️  No transcript data found for {company_symbol}, but continuing...")
             
-            # Run qualitative analysis
+            # Run qualitative analysis with available data
             qualitative_result = self.qualitative_analyzer.analyze_transcripts(
                 company_symbol=company_symbol,
                 analysis_period="Q1-2025"
@@ -168,22 +173,43 @@ class FinancialForecastingAgent:
             return None
     
     def _download_company_transcripts(self, company_symbol: str) -> bool:
-        """Download and add transcript data for a company on-demand"""
+        """Download and add transcript data for a company if not already present"""
         try:
+            # Check if we already have substantial transcript data for this company
+            stats = self.qualitative_analyzer.vectorstore.get_collection_stats()
+            companies = stats.get('companies', [])
+            
+            if company_symbol in companies:
+                # Check if we have enough chunks for this company
+                company_chunks = 0
+                try:
+                    test_results = self.qualitative_analyzer.vectorstore.search_transcripts(
+                        "test", company_symbol, n_results=5, min_similarity=-1.0
+                    )
+                    company_chunks = len(test_results)
+                except:
+                    company_chunks = 0
+                
+                if company_chunks >= 10:  # Threshold for "enough" data
+                    logger.info(f"✅ Sufficient transcript data exists for {company_symbol} ({company_chunks} chunks)")
+                    return True
+            
+            # Download fresh transcripts
+            logger.info(f"📥 Downloading transcript data for {company_symbol}...")
             from utils.data_downloader import ScreenerDataDownloader
             
             downloader = ScreenerDataDownloader()
             results = downloader.get_latest_documents(company_symbol, max_reports=0, max_transcripts=3)
             
             if not results['transcripts']:
-                logger.warning(f"No transcripts found for {company_symbol}")
+                logger.error(f"❌ No transcripts downloaded for {company_symbol}")
                 return False
             
             # Add to vector store
             total_chunks = 0
             for transcript in results['transcripts']:
                 content = transcript.get('full_content', transcript.get('content', ''))
-                if len(content) > 2000:  # Require substantial content
+                if len(content) > 2000:  # Quality threshold
                     chunks_added = self.qualitative_analyzer.vectorstore.add_transcript(
                         transcript_text=content,
                         company_symbol=company_symbol,
@@ -191,17 +217,17 @@ class FinancialForecastingAgent:
                         source_info={'source': 'earnings_call', 'auto_download': True}
                     )
                     total_chunks += chunks_added
-                    logger.info(f"   Added {chunks_added} chunks from {transcript['date']}")
+                    logger.info(f"   ✅ Added {chunks_added} chunks from {transcript['date']}")
             
             if total_chunks > 0:
                 logger.info(f"✅ Successfully added {total_chunks} transcript chunks for {company_symbol}")
                 return True
             else:
-                logger.warning(f"No usable transcript content for {company_symbol}")
+                logger.error(f"❌ No usable transcript content for {company_symbol}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Failed to download transcripts for {company_symbol}: {e}")
+            logger.error(f"❌ Failed to download transcripts for {company_symbol}: {e}")
             return False
     
     def _get_market_data(self, company_symbol: str):
