@@ -1,778 +1,702 @@
-# Financial Forecasting Agent
+# Production Deployment Guide
 
-> AI-powered financial analysis system that generates comprehensive investment forecasts by combining quantitative metrics, qualitative insights, and live market data.
+## Production Environment Setup
 
-## Overview
+### Database Configuration
 
-The Financial Forecasting Agent automatically analyzes corporate financial documents, earnings call transcripts, and real-time market data to produce structured investment recommendations. Built for financial analysts, portfolio managers, and investment researchers who need data-driven insights for decision making.
-
-### Key Features
-
-- **Automated Data Extraction**: Downloads and processes quarterly financial reports from public sources
-- **Intelligent Document Analysis**: Extracts key financial metrics (revenue, profit, margins) using AI
-- **Qualitative Sentiment Analysis**: Analyzes earnings call transcripts for management outlook and themes
-- **Live Market Integration**: Fetches real-time stock data with valuation analysis
-- **Structured Forecasts**: Produces machine-readable JSON with investment recommendations
-- **Enterprise Logging**: Tracks all requests and responses in MySQL database
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- MySQL 8.0 (recommended) or SQLite (automatic fallback)
-- Git
-
-### 1. Installation
-
-```bash
-# Clone repository
-git clone <repository-url>
-cd financial-forecasting-agent
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 2. Configuration
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your MySQL password (required)
-# LLM API keys are optional - system uses Ollama by default
-```
-
-### 3. Database Setup
-
-#### MySQL Setup (Recommended)
-
-**Install MySQL:**
-```bash
-# macOS
-brew install mysql
-brew services start mysql
-
-# Ubuntu/Linux
-sudo apt update
-sudo apt install mysql-server
-sudo systemctl start mysql
-
-# Windows
-# Download from https://dev.mysql.com/downloads/mysql/
-```
-
-**Configure MySQL:**
-```bash
-# Secure installation
-mysql_secure_installation
-
-# Create database and user
-mysql -u root -p
-```
-
-**In MySQL prompt:**
-```sql
-CREATE DATABASE financial_forecasting;
-CREATE USER 'forecast_user'@'localhost' IDENTIFIED BY 'your_secure_password';
-GRANT ALL PRIVILEGES ON financial_forecasting.* TO 'forecast_user'@'localhost';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-**Update .env with your credentials:**
-```bash
-MYSQL_HOST=localhost
-MYSQL_USER=forecast_user
-MYSQL_PASSWORD=your_secure_password
-MYSQL_DATABASE=financial_forecasting
-```
-
-#### LLM Provider Setup
-
-**Note**: The original requirements mentioned Vertex AI, but we implemented a **more robust multi-provider system** that includes Ollama, OpenAI, Anthropic, and Hugging Face with automatic fallback. This approach provides:
-- **Better reliability** (automatic failover between providers)
-- **Cost flexibility** (free local option with Ollama)
-- **Higher performance** (optimized model selection)
-- **Evaluator convenience** (works without specific cloud setup)
-
-The system supports multiple LLM providers with automatic fallback. Choose your preferred option:
-
-**Option 1: Ollama (Recommended - No API Keys Needed)**
-```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Start Ollama service
-ollama serve
-
-# Download model (in another terminal)
-ollama pull llama3.1:8b
-
-# Verify installation
-ollama list
-```
-
-**Option 2: OpenAI (Premium)**
-```bash
-# Get API key from https://platform.openai.com/api-keys
-# Add to .env:
-OPENAI_API_KEY=sk-your-openai-key-here
-```
-
-**Option 3: Anthropic Claude (Premium)**
-```bash
-# Get API key from https://console.anthropic.com/
-# Add to .env:
-ANTHROPIC_API_KEY=your-anthropic-key-here
-```
-
-**Option 4: Hugging Face (Free Tier Available)**
-```bash
-# Get token from https://huggingface.co/settings/tokens
-# Add to .env:
-HUGGINGFACE_API_TOKEN=your-hf-token-here
-```
-
-**LLM Provider Priority:**
-The system automatically tries providers in this order:
-1. **Ollama** (if available) - No API costs
-2. **OpenAI** (if API key provided) - Best performance  
-3. **Anthropic** (if API key provided) - Advanced reasoning
-4. **Hugging Face** (if token provided) - Free tier backup
-
-### 4. Start the API
-
-```bash
-# Start the FastAPI server
-uvicorn app.main:app --reload
-
-# Alternative: Start on specific port
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# For production deployment
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-**Expected startup output:**
-```
-INFO: 🚀 Starting Financial Forecasting Agent...
-INFO: ✅ Connected to MySQL database
-INFO: 🔧 Initializing AI agent and tools (sentence transformers, vector store, etc.)...
-INFO: ✅ Agent and tools ready - requests will now be fast!
-INFO: ✅ Financial Forecasting Agent started successfully
-INFO: Uvicorn running on http://127.0.0.1:8000
-```
-
-### 5. Verify Installation
-
-```bash
-# Test health endpoint
-curl http://localhost:8000/health
-
-# Expected response:
-{
-  "status": "healthy",
-  "timestamp": "2025-07-27T15:30:00Z",
-  "components": {
-    "agent": "operational",
-    "database": "operational",
-    "market_data": "operational"
-  }
-}
-```
-
-### 5. Generate Forecast
-
-```bash
-curl -X POST 'http://localhost:8000/forecast' \
-     -H 'Content-Type: application/json' \
-     -d '{"company_symbol": "TCS", "forecast_period": "Q2-2025"}'
-```
-
-## Agent & Tool Design
-
-### Master Agent Architecture
-
-The `FinancialForecastingAgent` orchestrates three specialized tools using a structured reasoning approach:
-
-```python
-# Master Agent Reasoning Chain
-def generate_forecast(self, company_symbol: str, forecast_period: str):
-    1. Extract quantitative financial metrics (FinancialDataExtractorTool)
-    2. Analyze qualitative management insights (QualitativeAnalysisTool)  
-    3. Gather live market context (MarketDataTool)
-    4. Synthesize comprehensive forecast using LLM reasoning
-    5. Return structured investment recommendation
-```
-
-### Tool 1: FinancialDataExtractorTool
-
-**Purpose**: Extract structured financial metrics from quarterly/annual PDF reports
-
-**Process Flow**:
-```
-PDF Download → Table Extraction → LLM Parsing → Structured Metrics
-```
-
-**Key Components**:
-- **PDFTableExtractor**: Uses pdfplumber to extract tables from financial PDFs
-- **LLM Parser**: Interprets table content to identify key financial metrics
-- **Data Validation**: Ensures extracted numbers follow business logic
-
-**Master Prompt for Financial Extraction**:
-```
-You are a financial analyst extracting key metrics from {company_symbol} financial tables.
-
-FINANCIAL TABLES:
-{table_text}
-
-TASK: Extract the following key financial metrics (values in Crores INR):
-1. TOTAL REVENUE / TOTAL INCOME
-2. NET PROFIT / NET PROFIT AFTER TAX  
-3. OPERATING PROFIT / EBIT
-4. OPERATING MARGIN (as percentage)
-5. NET MARGIN (as percentage)
-
-RESPOND IN THIS EXACT JSON FORMAT:
-{
-    "total_revenue": <number_or_null>,
-    "net_profit": <number_or_null>, 
-    "operating_profit": <number_or_null>,
-    "operating_margin": <number_or_null>,
-    "net_margin": <number_or_null>,
-    "confidence": <0.0_to_1.0>,
-    "notes": "<explanation_of_findings>"
-}
-```
-
-**Output**: Structured `FinancialMetrics` object with revenue, profit, margins, and confidence scores
-
-### Tool 2: QualitativeAnalysisTool
-
-**Purpose**: Extract management sentiment and business insights from earnings call transcripts
-
-**Process Flow**:
-```
-Transcript Download → Text Chunking → Vector Embedding → Semantic Search → LLM Analysis
-```
-
-**Key Components**:
-- **TranscriptVectorStore**: ChromaDB-based semantic search using sentence-transformers
-- **Intelligent Chunking**: Segments transcripts by speaker and topic for better retrieval
-- **Multi-Query Analysis**: Searches for outlook, risks, and opportunities separately
-
-**Master Prompt for Sentiment Analysis**:
-```
-You are analyzing management sentiment from {company_symbol} earnings call excerpts.
-
-TRANSCRIPT EXCERPTS:
-{transcript_text}
-
-TASK: Analyze overall management sentiment and tone.
-
-RESPOND IN THIS EXACT JSON FORMAT:
-{
-    "overall_tone": "<positive|negative|neutral|mixed>",
-    "optimism_score": <0.0_to_1.0>,
-    "key_themes": ["theme1", "theme2", "theme3"],
-    "forward_looking_statements": ["statement1", "statement2"],
-    "confidence": <0.0_to_1.0>
-}
-
-GUIDELINES:
-- optimism_score: 0.0 (very pessimistic) to 1.0 (very optimistic)
-- key_themes: Main topics management emphasized
-- Focus on future guidance and business outlook
-```
-
-**Master Prompt for Insight Extraction**:
-```
-You are extracting {insight_type} from {company_symbol} earnings call excerpts.
-
-TASK: Extract 1-2 key insights about {business_outlook|risk_factors|growth_opportunities}.
-
-RESPOND IN THIS EXACT JSON FORMAT:
-{
-    "insights": [
-        {
-            "insight": "<clear, specific insight>",
-            "confidence": <0.0_to_1.0>,
-            "supporting_quote": "<exact quote from transcript>"
-        }
-    ]
-}
-```
-
-**Output**: Structured `QualitativeAnalysisResult` with sentiment scores, business insights, and supporting quotes
-
-### Tool 3: MarketDataTool
-
-**Purpose**: Provide real-time market context and valuation analysis
-
-**Process Flow**:
-```
-Yahoo Finance API → Live Data Fetch → Valuation Analysis → Market Context
-```
-
-**Key Components**:
-- **Stock Data Fetcher**: Real-time price, volume, P/E ratios from Yahoo Finance
-- **Valuation Analyzer**: Compares current metrics to sector averages
-- **Risk Assessor**: Evaluates position in 52-week range and momentum
-
-**Market Analysis Logic**:
-```python
-# Valuation Assessment
-if pe_ratio < 20: valuation = "undervalued"
-elif pe_ratio > 30: valuation = "overvalued"  
-else: valuation = "fairly_valued"
-
-# Momentum Assessment
-if price_change > 1.0: momentum = "bullish"
-elif price_change < -1.0: momentum = "bearish"
-else: momentum = "neutral"
-
-# Risk Assessment  
-if current_vs_high > 40%: risk = "medium"
-elif current_vs_low < 20%: risk = "high"
-else: risk = "low"
-```
-
-**Output**: Structured `MarketData` and `MarketContext` with live prices, ratios, and intelligent analysis
-
-### Master Agent Synthesis Prompt
-
-The agent combines all three data sources using this comprehensive reasoning prompt:
-
-```
-You are a senior financial analyst creating a comprehensive forecast by integrating:
-
-1. FINANCIAL METRICS (from quarterly reports)
-2. MANAGEMENT INSIGHTS (from earnings call transcripts) 
-3. MARKET CONTEXT (live stock data and valuation)
-
-COMPREHENSIVE ANALYSIS:
-{analysis_summary}
-
-TASK: Create a unified investment forecast for the next quarter.
-
-RESPOND IN THIS EXACT JSON FORMAT:
-{
-    "overall_outlook": "<positive|neutral|negative>",
-    "confidence_score": <0.0_to_1.0>,
-    "investment_recommendation": "<buy|hold|sell>",
-    "key_drivers": [
-        "financial trend 1",
-        "management insight 1", 
-        "market factor 1"
-    ],
-    "forecast_rationale": "2-3 sentence explanation combining all data sources",
-    "next_quarter_outlook": "specific predictions for upcoming quarter"
-}
-
-REASONING GUIDELINES:
-- Higher confidence when all sources align
-- Consider financial trends, management sentiment, and market positioning
-- Focus on actionable investment thesis
-- Integrate insights from ALL data sources
-```
-
-### Agent Reasoning Chain
-
-The master agent follows this structured thought process:
-
-1. **Data Gathering Phase**:
-   - Downloads fresh financial reports and extracts quantitative metrics
-   - Processes earnings call transcripts for qualitative insights
-   - Fetches live market data for current positioning
-
-2. **Analysis Phase**:
-   - Identifies trends in financial performance (revenue growth, margin changes)
-   - Extracts management sentiment and forward guidance
-   - Evaluates current market valuation and momentum
-
-3. **Synthesis Phase**:
-   - Combines quantitative trends with qualitative insights
-   - Weighs management outlook against market positioning
-   - Generates confidence score based on data alignment
-
-4. **Forecast Generation**:
-   - Produces overall outlook (positive/neutral/negative)
-   - Generates investment recommendation (buy/hold/sell)
-   - Identifies key drivers from all three data sources
-   - Provides specific next-quarter predictions
-
-### Tool Integration Strategy
-
-**Data Source Priority**:
-- **Financial Metrics**: Provides quantitative foundation and trend analysis
-- **Management Insights**: Adds qualitative context and forward guidance
-- **Market Data**: Validates current positioning and investor sentiment
-
-**Confidence Scoring**:
-- **High (0.8+)**: All three sources align and provide clear signals
-- **Medium (0.5-0.8)**: Mixed signals requiring balanced interpretation  
-- **Low (0.0-0.5)**: Limited data or conflicting indicators
-
-**Error Handling**: Each tool operates independently, allowing the agent to generate forecasts even with partial data availability.
-
-### System Design
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    FastAPI Application                  │
-│                  (REST API Endpoints)                  │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│              FinancialForecastingAgent                 │
-│              (Master Orchestrator)                     │
-└─┬─────────────────┬─────────────────┬─────────────────┬─┘
-  │                 │                 │                 │
-┌─▼─────────────┐ ┌─▼─────────────┐ ┌─▼─────────────┐ ┌─▼──────┐
-│FinancialData │ │QualitativeAn │ │ MarketData    │ │ MySQL  │
-│ExtractorTool │ │alysisTool    │ │ Tool          │ │Database│
-│              │ │              │ │               │ │        │
-│• PDF Analysis│ │• RAG Search  │ │• Live Prices  │ │• Logs  │
-│• LLM Parsing │ │• Transcripts │ │• Valuation    │ │• Stats │
-└──────────────┘ └──────────────┘ └───────────────┘ └────────┘
-```
-
-### Data Flow
-
-1. **Financial Extraction**: Downloads quarterly reports → Extracts financial tables → LLM parsing → Structured metrics
-2. **Qualitative Analysis**: Downloads earnings transcripts → Vector embeddings → Semantic search → Management insights  
-3. **Market Intelligence**: Yahoo Finance API → Live stock data → Valuation analysis → Market context
-4. **Forecast Synthesis**: Combines all sources → LLM reasoning → Investment recommendation → JSON output
-
-## API Reference
-
-### Generate Forecast
-
-**Endpoint**: `POST /forecast`
-
-**Request**:
-```json
-{
-  "company_symbol": "TCS",
-  "forecast_period": "Q2-2025"
-}
-```
-
-**Response**:
-```json
-{
-  "company_symbol": "TCS",
-  "investment_recommendation": "buy",
-  "analyst_confidence": 0.85,
-  "overall_outlook": "positive",
-  "current_price": 3135.8,
-  "target_price": 3606.17,
-  "target_upside_percent": 15.0,
-  "management_sentiment": "positive",
-  "management_optimism_score": 0.8,
-  "business_outlook_insights": [
-    "Revenue growth expected to accelerate in next quarter",
-    "Cost optimization initiatives showing positive results"
-  ],
-  "growth_opportunities": [
-    "AI adoption driving new business opportunities",
-    "Expansion in cloud services segment"
-  ],
-  "risk_factors": [
-    "No significant risk factors identified in current analysis"
-  ],
-  "key_drivers": [
-    "Strong financial fundamentals",
-    "Positive management outlook", 
-    "Favorable market positioning"
-  ],
-  "processing_time": 45.2,
-  "generated_at": "2025-07-27T15:30:00Z"
-}
-```
-
-### Response Field Guide
-
-| Field | Type | Scale | Description |
-|-------|------|-------|-------------|
-| `analyst_confidence` | float | 0.0-1.0 | Overall forecast confidence. 0.0=very uncertain, 0.5=moderate, 0.8+=high confidence |
-| `management_optimism_score` | float | 0.0-1.0 | Management sentiment score. 0.0=very pessimistic, 0.5=neutral, 1.0=very optimistic |
-| `investment_recommendation` | string | buy/hold/sell | Investment action based on analysis |
-| `overall_outlook` | string | positive/neutral/negative | General business outlook |
-| `target_upside_percent` | float | percentage | Expected price appreciation (only for "buy" recommendations) |
-```
-
-### Health Check
-
-**Endpoint**: `GET /health`
-
-**Response**:
-```json
-{
-  "status": "healthy",
-  "timestamp": "2025-07-27T15:30:00Z",
-  "components": {
-    "agent": "operational",
-    "database": "operational", 
-    "market_data": "operational"
-  }
-}
-```
-
-## Configuration
-
-### Environment Variables
-
-Create `.env` file in project root:
-
-```bash
-# Database Configuration (Required)
-MYSQL_HOST=localhost
-MYSQL_USER=forecast_user
-MYSQL_PASSWORD=your_secure_password
-MYSQL_DATABASE=financial_forecasting
-
-# LLM API Keys (Optional - system uses Ollama by default)
-OPENAI_API_KEY=sk-your-openai-key-here
-ANTHROPIC_API_KEY=your-anthropic-key-here
-HUGGINGFACE_API_TOKEN=your-hf-token-here
-
-# Application Settings
-LOG_LEVEL=INFO
-```
-
-### Configuration Reference
-
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `MYSQL_HOST` | Yes | MySQL server host | `localhost` |
-| `MYSQL_USER` | Yes | MySQL username | `forecast_user` |
-| `MYSQL_PASSWORD` | Yes | MySQL password | `secure_password123` |
-| `MYSQL_DATABASE` | Yes | Database name | `financial_forecasting` |
-| `OPENAI_API_KEY` | No | OpenAI API key | `sk-proj-...` |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key | `sk-ant-...` |
-| `HUGGINGFACE_API_TOKEN` | No | HuggingFace token | `hf_...` |
-| `LOG_LEVEL` | No | Logging level | `INFO` |
-
-### LLM Provider Selection
-
-The system automatically selects the best available LLM provider:
-
-1. **Ollama** (Local, no API key needed)
-   - ✅ Free and private
-   - ✅ No rate limits
-   - ✅ Works offline
-   - ❌ Requires local resources
-
-2. **OpenAI** (Premium, requires API key)
-   - ✅ High quality responses
-   - ✅ Fast processing
-   - ❌ API costs apply
-   - ❌ Internet required
-
-3. **Anthropic** (Premium, requires API key)
-   - ✅ Advanced reasoning
-   - ✅ Long context support
-   - ❌ API costs apply
-   - ❌ Internet required
-
-4. **Hugging Face** (Free tier available)
-   - ✅ Free tier available
-   - ✅ Various models
-   - ❌ Rate limits on free tier
-   - ❌ Internet required
-
-## Troubleshooting
-
-### Common Setup Issues
-
-**1. MySQL Connection Failed**
-```bash
-ERROR: MySQL connection failed: Access denied for user 'root'@'localhost'
-```
-**Solution:**
-- Verify MySQL is running: `brew services list | grep mysql` (macOS)
-- Check password in `.env` matches MySQL password
-- Ensure database exists: `mysql -u root -p -e "SHOW DATABASES;"`
-
-**2. Ollama Not Found**
-```bash
-ERROR: No LLM providers available
-```
-**Solution:**
-```bash
-# Check if Ollama is running
-ollama list
-
-# If not installed
-curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull llama3.1:8b
-
-# Start Ollama service
-ollama serve
-```
-
-**3. PDF Download Fails**
-```bash
-WARNING: Failed to download PDF
-```
-**Solution:**
-- Check internet connection
-- Some PDFs may be temporarily unavailable
-- System will continue with available data sources
-
-**4. Port Already in Use**
-```bash
-ERROR: [Errno 48] Address already in use
-```
-**Solution:**
-```bash
-# Kill existing process
-lsof -ti:8000 | xargs kill -9
-
-# Or use different port
-uvicorn app.main:app --port 8001
-```
-
-### Performance Optimization
-
-**For Better Performance:**
-- Use **Ollama with llama3.1:8b** for fastest local processing
-- Add **OpenAI API key** for best quality responses
-- Ensure **MySQL** is properly indexed (automatic)
-- Use **SSD storage** for faster PDF processing
-
-## Supported Companies
-
-The system works with any NSE-listed Indian company:
-
-- **TCS** (Tata Consultancy Services)
-- **INFY** (Infosys) 
-- **RELIANCE** (Reliance Industries)
-- **HDFCBANK** (HDFC Bank)
-- **WIPRO** (Wipro Technologies)
-- And 1000+ other NSE companies
-
-## Production Deployment
-
-### Database Setup
+#### MySQL Production Setup
 
 ```sql
--- Create production database
+-- Create production database and user
 CREATE DATABASE financial_forecasting;
-CREATE USER 'forecast_user'@'%' IDENTIFIED BY 'secure_password';
+CREATE USER 'forecast_user'@'%' IDENTIFIED BY 'secure_production_password';
 GRANT ALL PRIVILEGES ON financial_forecasting.* TO 'forecast_user'@'%';
 FLUSH PRIVILEGES;
+
+-- Optimize for production
+SET GLOBAL innodb_buffer_pool_size = 1073741824;  -- 1GB
+SET GLOBAL max_connections = 200;
+SET GLOBAL query_cache_size = 67108864;  -- 64MB
 ```
 
-### Environment Configuration
+#### Production Environment Variables
 
 ```bash
 # Production .env
-MYSQL_HOST=your-db-host.com
+MYSQL_HOST=your-production-db-host.com
 MYSQL_USER=forecast_user
-MYSQL_PASSWORD=secure_password
+MYSQL_PASSWORD=secure_production_password
 MYSQL_DATABASE=financial_forecasting
 
-# Add API keys for better performance
-OPENAI_API_KEY=sk-your-openai-key
+# Production LLM configuration
+OPENAI_API_KEY=sk-your-production-openai-key
 LOG_LEVEL=WARNING
+
+# Optional: Additional production settings
+API_WORKERS=4
+MAX_CONNECTIONS=100
 ```
 
 ### Docker Deployment
 
+#### Dockerfile
+
 ```dockerfile
 FROM python:3.10-slim
 
+# Set working directory
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
 COPY . .
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
 EXPOSE 8000
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Start application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-### Performance Optimizations
+#### Docker Compose
 
-- **Caching**: Implement Redis for market data caching
-- **Load Balancing**: Use nginx for multiple instances
-- **Database**: Configure MySQL connection pooling
-- **Monitoring**: Add Prometheus metrics and health checks
+```yaml
+version: '3.8'
 
-## Error Handling & Data Quality
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_USER=forecast_user
+      - MYSQL_PASSWORD=secure_password
+      - MYSQL_DATABASE=financial_forecasting
+    depends_on:
+      - db
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: financial_forecasting
+      MYSQL_USER: forecast_user
+      MYSQL_PASSWORD: secure_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
 
-The system includes comprehensive error handling and graceful degradation:
+volumes:
+  mysql_data:
+```
 
-### Data Availability
-- **Full Analysis**: When all 3 data sources are available (financial reports, transcripts, market data)
-- **Partial Analysis**: When some data sources fail, analysis continues with available data
-- **Professional Fallbacks**: Empty lists are replaced with explanatory messages:
-  - `"No significant risk factors identified in current analysis"`
-  - `"Business outlook analysis pending - limited transcript data available"`
+### Kubernetes Deployment
 
-### Data Source Failures
-- **Financial Data Unavailable**: Uses market data and qualitative analysis only
-- **Transcript Data Limited**: Relies on financial metrics and market context  
-- **Market Data Offline**: Continues with financial and qualitative analysis
+#### Deployment YAML
 
-### LLM Provider Fallback
-- **Ollama** (Local, primary) → **OpenAI** (API) → **Anthropic** (API) → **Hugging Face** (Free)
-- Automatic provider switching ensures system reliability
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: financial-forecasting-agent
+  labels:
+    app: financial-forecasting-agent
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: financial-forecasting-agent
+  template:
+    metadata:
+      labels:
+        app: financial-forecasting-agent
+    spec:
+      containers:
+      - name: app
+        image: your-registry/financial-forecasting-agent:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MYSQL_HOST
+          value: "mysql-service"
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: password
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-secret
+              key: openai-key
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: financial-forecasting-service
+spec:
+  selector:
+    app: financial-forecasting-agent
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: LoadBalancer
+```
 
-### Database Resilience
-- **MySQL Preferred**: Full logging and analytics
-- **SQLite Fallback**: Automatic fallback when MySQL unavailable
-- **Graceful Degradation**: API continues working even if logging fails
+### Cloud Provider Configurations
 
-## Security Considerations
+#### AWS Deployment
 
-- **API Authentication**: Add JWT tokens for production use
-- **Input Validation**: All inputs are validated and sanitized
-- **SQL Injection**: Uses parameterized queries and ORM
-- **Data Privacy**: No sensitive financial data is stored permanently
+```bash
+# ECS Task Definition
+{
+  "family": "financial-forecasting-agent",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::account:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "financial-forecasting-agent",
+      "image": "your-account.dkr.ecr.region.amazonaws.com/financial-forecasting-agent:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MYSQL_HOST",
+          "value": "your-rds-endpoint.region.rds.amazonaws.com"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "MYSQL_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:region:account:secret:mysql-password"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Google Cloud Platform
+
+```yaml
+# Cloud Run Service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: financial-forecasting-agent
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/memory: "2Gi"
+        run.googleapis.com/cpu: "1000m"
+    spec:
+      containers:
+      - image: gcr.io/your-project/financial-forecasting-agent:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MYSQL_HOST
+          value: "your-cloud-sql-ip"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: password
+```
+
+## Security Configuration
+
+### API Security
+
+#### Authentication Setup
+
+```python
+# Add to app/main.py
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException
+
+security = HTTPBearer()
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    # Implement JWT verification logic
+    if not verify_jwt_token(token):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return token
+
+# Protect endpoints
+@app.post("/forecast")
+async def generate_forecast(request: ForecastRequest, token: str = Depends(verify_token)):
+    # Your existing code
+```
+
+#### Rate Limiting
+
+```python
+# Add rate limiting middleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.post("/forecast")
+@limiter.limit("5/minute")  # 5 requests per minute
+async def generate_forecast(request: Request, forecast_request: ForecastRequest):
+    # Your existing code
+```
+
+### Database Security
+
+#### SSL Configuration
+
+```python
+# MySQL SSL connection
+import pymysql
+
+ssl_config = {
+    'ssl': {
+        'ca': '/path/to/ca-cert.pem',
+        'cert': '/path/to/client-cert.pem',
+        'key': '/path/to/client-key.pem'
+    }
+}
+
+connection = pymysql.connect(
+    host=MYSQL_HOST,
+    user=MYSQL_USER,
+    password=MYSQL_PASSWORD,
+    database=MYSQL_DATABASE,
+    **ssl_config
+)
+```
+
+#### Data Encryption
+
+```python
+# Encrypt sensitive data before storage
+from cryptography.fernet import Fernet
+
+class EncryptedDatabase:
+    def __init__(self, encryption_key):
+        self.cipher = Fernet(encryption_key)
+    
+    def encrypt_data(self, data):
+        return self.cipher.encrypt(data.encode()).decode()
+    
+    def decrypt_data(self, encrypted_data):
+        return self.cipher.decrypt(encrypted_data.encode()).decode()
+```
+
+### Network Security
+
+#### HTTPS Configuration
+
+```nginx
+# Nginx configuration
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/private.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512;
+    
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
 
 ## Monitoring and Observability
 
-### Logs
+### Application Monitoring
 
-```bash
-# View application logs
-tail -f /var/log/forecast-agent/app.log
+#### Prometheus Metrics
 
-# Database query logs
-SELECT COUNT(*) FROM forecast_requests WHERE created_at > NOW() - INTERVAL 1 DAY;
+```python
+# Add to app/main.py
+from prometheus_client import Counter, Histogram, generate_latest
+import time
+
+# Metrics
+REQUEST_COUNT = Counter('forecast_requests_total', 'Total forecast requests', ['method', 'endpoint'])
+REQUEST_LATENCY = Histogram('forecast_request_duration_seconds', 'Request latency')
+
+@app.middleware("http")
+async def add_metrics(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    
+    REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
+    REQUEST_LATENCY.observe(time.time() - start_time)
+    
+    return response
+
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(), media_type="text/plain")
 ```
 
-### Metrics
+#### Logging Configuration
 
-- **Request Rate**: Average requests per minute
-- **Processing Time**: 95th percentile response times
-- **Success Rate**: Percentage of successful forecasts
-- **Data Quality**: Confidence scores and source availability
+```python
+# Structured logging for production
+import structlog
+import json
 
-## Technical Stack
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.JSONRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+```
 
-- **Backend**: FastAPI with async support
-- **AI Framework**: LangChain for agent orchestration  
-- **Database**: MySQL 8.0 with SQLAlchemy ORM
-- **Vector Store**: ChromaDB with sentence-transformers
-- **Document Processing**: pdfplumber for financial reports
-- **Market Data**: Yahoo Finance API integration
-- **LLM Support**: Ollama, OpenAI, Anthropic, Hugging Face
+### Infrastructure Monitoring
 
-## License
+#### Health Checks
 
-MIT License - see [LICENSE](LICENSE) file for details.
+```python
+# Enhanced health check
+@app.get("/health/detailed")
+async def detailed_health_check():
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0",
+        "components": {}
+    }
+    
+    # Database health
+    try:
+        await db_manager.get_request_stats()
+        health_status["components"]["database"] = "healthy"
+    except Exception:
+        health_status["components"]["database"] = "unhealthy"
+        health_status["status"] = "degraded"
+    
+    # LLM health
+    try:
+        from app.main import get_agent
+        agent = get_agent()
+        health_status["components"]["agent"] = "healthy"
+    except Exception:
+        health_status["components"]["agent"] = "unhealthy"
+        health_status["status"] = "degraded"
+    
+    # External APIs
+    try:
+        import yfinance as yf
+        yf.Ticker("TCS.NS").info  # Quick test
+        health_status["components"]["market_data"] = "healthy"
+    except Exception:
+        health_status["components"]["market_data"] = "unhealthy"
+    
+    return health_status
+```
 
-## Support
+#### Alerting
 
-For technical support or feature requests, please contact the development team.
+```yaml
+# Prometheus alerting rules
+groups:
+- name: financial-forecasting-agent
+  rules:
+  - alert: HighErrorRate
+    expr: rate(forecast_requests_total{status="error"}[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High error rate detected"
+      
+  - alert: HighLatency
+    expr: histogram_quantile(0.95, forecast_request_duration_seconds) > 300
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High latency detected"
+      
+  - alert: ServiceDown
+    expr: up{job="financial-forecasting-agent"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Service is down"
+```
 
----
+## Performance Optimization
 
-**Version**: 1.0.0  
-**Last Updated**: July 2025
+### Caching Strategies
+
+#### Redis Integration
+
+```python
+# Add Redis caching
+import redis
+import json
+from datetime import timedelta
+
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
+
+class CacheManager:
+    def __init__(self):
+        self.redis = redis_client
+        self.default_ttl = 3600  # 1 hour
+    
+    async def get_cached_forecast(self, company_symbol: str):
+        cache_key = f"forecast:{company_symbol}"
+        cached_data = self.redis.get(cache_key)
+        if cached_data:
+            return json.loads(cached_data)
+        return None
+    
+    async def cache_forecast(self, company_symbol: str, forecast_data: dict):
+        cache_key = f"forecast:{company_symbol}"
+        self.redis.setex(
+            cache_key, 
+            self.default_ttl, 
+            json.dumps(forecast_data, default=str)
+        )
+```
+
+#### Database Optimization
+
+```sql
+-- Add indexes for better performance
+CREATE INDEX idx_forecast_requests_company ON forecast_requests(company_symbol);
+CREATE INDEX idx_forecast_requests_created ON forecast_requests(created_at);
+CREATE INDEX idx_forecast_requests_success ON forecast_requests(success);
+
+-- Partition large tables by date
+ALTER TABLE forecast_requests PARTITION BY RANGE (YEAR(created_at)) (
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+```
+
+### Load Balancing
+
+#### Nginx Configuration
+
+```nginx
+upstream financial_forecasting_backend {
+    server 127.0.0.1:8000;
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+}
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://financial_forecasting_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 300s;  # Long timeout for forecast generation
+    }
+}
+```
+
+## Backup and Disaster Recovery
+
+### Database Backup
+
+```bash
+#!/bin/bash
+# Automated MySQL backup script
+
+BACKUP_DIR="/var/backups/mysql"
+DATE=$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="financial_forecasting_backup_$DATE.sql"
+
+# Create backup
+mysqldump -u root -p financial_forecasting > "$BACKUP_DIR/$BACKUP_FILE"
+
+# Compress backup
+gzip "$BACKUP_DIR/$BACKUP_FILE"
+
+# Upload to cloud storage (example: AWS S3)
+aws s3 cp "$BACKUP_DIR/$BACKUP_FILE.gz" s3://your-backup-bucket/mysql/
+
+# Clean up old backups (keep 30 days)
+find "$BACKUP_DIR" -name "*.gz" -mtime +30 -delete
+```
+
+### Application State Backup
+
+```python
+# Backup vector store and configuration
+import shutil
+import tarfile
+from datetime import datetime
+
+def backup_application_state():
+    backup_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"/var/backups/app/app_state_{backup_time}.tar.gz"
+    
+    with tarfile.open(backup_path, "w:gz") as tar:
+        tar.add("data/vector_store", arcname="vector_store")
+        tar.add(".env", arcname="config/env")
+        tar.add("data/logs", arcname="logs")
+    
+    return backup_path
+```
+
+## Compliance and Auditing
+
+### Audit Logging
+
+```python
+# Enhanced audit logging
+class AuditLogger:
+    def __init__(self):
+        self.logger = structlog.get_logger("audit")
+    
+    def log_forecast_request(self, user_id: str, company_symbol: str, 
+                           ip_address: str, result: dict):
+        self.logger.info(
+            "forecast_generated",
+            user_id=user_id,
+            company_symbol=company_symbol,
+            ip_address=ip_address,
+            recommendation=result.get("investment_recommendation"),
+            confidence=result.get("analyst_confidence"),
+            processing_time=result.get("processing_time")
+        )
+```
+
+### Data Retention
+
+```sql
+-- Implement data retention policy
+DELIMITER //
+CREATE EVENT cleanup_old_requests
+ON SCHEDULE EVERY 1 DAY
+DO
+BEGIN
+    DELETE FROM forecast_requests 
+    WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY);
+END //
+DELIMITER ;
+```
+
+## Cost Optimization
+
+### Resource Management
+
+```python
+# Dynamic resource scaling based on load
+class ResourceManager:
+    def __init__(self):
+        self.max_workers = 4
+        self.current_load = 0
+    
+    def scale_workers(self, current_requests: int):
+        if current_requests > 10:
+            return min(self.max_workers, current_requests // 3)
+        return 1
+```
+
+### API Cost Management
+
+```python
+# LLM cost tracking
+class CostTracker:
+    def __init__(self):
+        self.costs = {
+            "openai": {"gpt-4": 0.03, "gpt-3.5": 0.002},
+            "anthropic": {"claude-3": 0.025}
+        }
+    
+    def track_llm_usage(self, provider: str, model: str, tokens: int):
+        cost = self.costs.get(provider, {}).get(model, 0) * tokens / 1000
+        # Log cost for billing
+        structlog.get_logger().info("llm_cost", provider=provider, model=model, tokens=tokens, cost=cost)
+```
