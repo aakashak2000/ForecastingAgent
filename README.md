@@ -7,7 +7,9 @@
 **Get the system running in 3 steps:**
 
 ```bash
-# 1. Install dependencies
+# 1. Clone and install
+git clone https://github.com/aakashak2000/ForecastingAgent.git
+cd ForecastingAgent
 pip install -r requirements.txt
 
 # 2. Setup database (update password in .env)
@@ -81,8 +83,8 @@ The Financial Forecasting Agent automatically analyzes corporate financial docum
 
 ```bash
 # Clone repository
-git clone <repository-url>
-cd financial-forecasting-agent
+git clone https://github.com/aakashak2000/ForecastingAgent.git
+cd ForecastingAgent
 
 # Install dependencies
 pip install -r requirements.txt
