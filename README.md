@@ -91,6 +91,12 @@ MYSQL_DATABASE=financial_forecasting
 
 #### LLM Provider Setup
 
+**Note**: The original requirements mentioned Vertex AI, but we implemented a **more robust multi-provider system** that includes Ollama, OpenAI, Anthropic, and Hugging Face with automatic fallback. This approach provides:
+- **Better reliability** (automatic failover between providers)
+- **Cost flexibility** (free local option with Ollama)
+- **Higher performance** (optimized model selection)
+- **Evaluator convenience** (works without specific cloud setup)
+
 The system supports multiple LLM providers with automatic fallback. Choose your preferred option:
 
 **Option 1: Ollama (Recommended - No API Keys Needed)**
@@ -139,7 +145,42 @@ The system automatically tries providers in this order:
 ### 4. Start the API
 
 ```bash
+# Start the FastAPI server
 uvicorn app.main:app --reload
+
+# Alternative: Start on specific port
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# For production deployment
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**Expected startup output:**
+```
+INFO: 🚀 Starting Financial Forecasting Agent...
+INFO: ✅ Connected to MySQL database
+INFO: 🔧 Initializing AI agent and tools (sentence transformers, vector store, etc.)...
+INFO: ✅ Agent and tools ready - requests will now be fast!
+INFO: ✅ Financial Forecasting Agent started successfully
+INFO: Uvicorn running on http://127.0.0.1:8000
+```
+
+### 5. Verify Installation
+
+```bash
+# Test health endpoint
+curl http://localhost:8000/health
+
+# Expected response:
+{
+  "status": "healthy",
+  "timestamp": "2025-07-27T15:30:00Z",
+  "components": {
+    "agent": "operational",
+    "database": "operational",
+    "market_data": "operational"
+  }
+}
 ```
 
 ### 5. Generate Forecast
@@ -150,7 +191,231 @@ curl -X POST 'http://localhost:8000/forecast' \
      -d '{"company_symbol": "TCS", "forecast_period": "Q2-2025"}'
 ```
 
-## Architecture
+## Agent & Tool Design
+
+### Master Agent Architecture
+
+The `FinancialForecastingAgent` orchestrates three specialized tools using a structured reasoning approach:
+
+```python
+# Master Agent Reasoning Chain
+def generate_forecast(self, company_symbol: str, forecast_period: str):
+    1. Extract quantitative financial metrics (FinancialDataExtractorTool)
+    2. Analyze qualitative management insights (QualitativeAnalysisTool)  
+    3. Gather live market context (MarketDataTool)
+    4. Synthesize comprehensive forecast using LLM reasoning
+    5. Return structured investment recommendation
+```
+
+### Tool 1: FinancialDataExtractorTool
+
+**Purpose**: Extract structured financial metrics from quarterly/annual PDF reports
+
+**Process Flow**:
+```
+PDF Download → Table Extraction → LLM Parsing → Structured Metrics
+```
+
+**Key Components**:
+- **PDFTableExtractor**: Uses pdfplumber to extract tables from financial PDFs
+- **LLM Parser**: Interprets table content to identify key financial metrics
+- **Data Validation**: Ensures extracted numbers follow business logic
+
+**Master Prompt for Financial Extraction**:
+```
+You are a financial analyst extracting key metrics from {company_symbol} financial tables.
+
+FINANCIAL TABLES:
+{table_text}
+
+TASK: Extract the following key financial metrics (values in Crores INR):
+1. TOTAL REVENUE / TOTAL INCOME
+2. NET PROFIT / NET PROFIT AFTER TAX  
+3. OPERATING PROFIT / EBIT
+4. OPERATING MARGIN (as percentage)
+5. NET MARGIN (as percentage)
+
+RESPOND IN THIS EXACT JSON FORMAT:
+{
+    "total_revenue": <number_or_null>,
+    "net_profit": <number_or_null>, 
+    "operating_profit": <number_or_null>,
+    "operating_margin": <number_or_null>,
+    "net_margin": <number_or_null>,
+    "confidence": <0.0_to_1.0>,
+    "notes": "<explanation_of_findings>"
+}
+```
+
+**Output**: Structured `FinancialMetrics` object with revenue, profit, margins, and confidence scores
+
+### Tool 2: QualitativeAnalysisTool
+
+**Purpose**: Extract management sentiment and business insights from earnings call transcripts
+
+**Process Flow**:
+```
+Transcript Download → Text Chunking → Vector Embedding → Semantic Search → LLM Analysis
+```
+
+**Key Components**:
+- **TranscriptVectorStore**: ChromaDB-based semantic search using sentence-transformers
+- **Intelligent Chunking**: Segments transcripts by speaker and topic for better retrieval
+- **Multi-Query Analysis**: Searches for outlook, risks, and opportunities separately
+
+**Master Prompt for Sentiment Analysis**:
+```
+You are analyzing management sentiment from {company_symbol} earnings call excerpts.
+
+TRANSCRIPT EXCERPTS:
+{transcript_text}
+
+TASK: Analyze overall management sentiment and tone.
+
+RESPOND IN THIS EXACT JSON FORMAT:
+{
+    "overall_tone": "<positive|negative|neutral|mixed>",
+    "optimism_score": <0.0_to_1.0>,
+    "key_themes": ["theme1", "theme2", "theme3"],
+    "forward_looking_statements": ["statement1", "statement2"],
+    "confidence": <0.0_to_1.0>
+}
+
+GUIDELINES:
+- optimism_score: 0.0 (very pessimistic) to 1.0 (very optimistic)
+- key_themes: Main topics management emphasized
+- Focus on future guidance and business outlook
+```
+
+**Master Prompt for Insight Extraction**:
+```
+You are extracting {insight_type} from {company_symbol} earnings call excerpts.
+
+TASK: Extract 1-2 key insights about {business_outlook|risk_factors|growth_opportunities}.
+
+RESPOND IN THIS EXACT JSON FORMAT:
+{
+    "insights": [
+        {
+            "insight": "<clear, specific insight>",
+            "confidence": <0.0_to_1.0>,
+            "supporting_quote": "<exact quote from transcript>"
+        }
+    ]
+}
+```
+
+**Output**: Structured `QualitativeAnalysisResult` with sentiment scores, business insights, and supporting quotes
+
+### Tool 3: MarketDataTool
+
+**Purpose**: Provide real-time market context and valuation analysis
+
+**Process Flow**:
+```
+Yahoo Finance API → Live Data Fetch → Valuation Analysis → Market Context
+```
+
+**Key Components**:
+- **Stock Data Fetcher**: Real-time price, volume, P/E ratios from Yahoo Finance
+- **Valuation Analyzer**: Compares current metrics to sector averages
+- **Risk Assessor**: Evaluates position in 52-week range and momentum
+
+**Market Analysis Logic**:
+```python
+# Valuation Assessment
+if pe_ratio < 20: valuation = "undervalued"
+elif pe_ratio > 30: valuation = "overvalued"  
+else: valuation = "fairly_valued"
+
+# Momentum Assessment
+if price_change > 1.0: momentum = "bullish"
+elif price_change < -1.0: momentum = "bearish"
+else: momentum = "neutral"
+
+# Risk Assessment  
+if current_vs_high > 40%: risk = "medium"
+elif current_vs_low < 20%: risk = "high"
+else: risk = "low"
+```
+
+**Output**: Structured `MarketData` and `MarketContext` with live prices, ratios, and intelligent analysis
+
+### Master Agent Synthesis Prompt
+
+The agent combines all three data sources using this comprehensive reasoning prompt:
+
+```
+You are a senior financial analyst creating a comprehensive forecast by integrating:
+
+1. FINANCIAL METRICS (from quarterly reports)
+2. MANAGEMENT INSIGHTS (from earnings call transcripts) 
+3. MARKET CONTEXT (live stock data and valuation)
+
+COMPREHENSIVE ANALYSIS:
+{analysis_summary}
+
+TASK: Create a unified investment forecast for the next quarter.
+
+RESPOND IN THIS EXACT JSON FORMAT:
+{
+    "overall_outlook": "<positive|neutral|negative>",
+    "confidence_score": <0.0_to_1.0>,
+    "investment_recommendation": "<buy|hold|sell>",
+    "key_drivers": [
+        "financial trend 1",
+        "management insight 1", 
+        "market factor 1"
+    ],
+    "forecast_rationale": "2-3 sentence explanation combining all data sources",
+    "next_quarter_outlook": "specific predictions for upcoming quarter"
+}
+
+REASONING GUIDELINES:
+- Higher confidence when all sources align
+- Consider financial trends, management sentiment, and market positioning
+- Focus on actionable investment thesis
+- Integrate insights from ALL data sources
+```
+
+### Agent Reasoning Chain
+
+The master agent follows this structured thought process:
+
+1. **Data Gathering Phase**:
+   - Downloads fresh financial reports and extracts quantitative metrics
+   - Processes earnings call transcripts for qualitative insights
+   - Fetches live market data for current positioning
+
+2. **Analysis Phase**:
+   - Identifies trends in financial performance (revenue growth, margin changes)
+   - Extracts management sentiment and forward guidance
+   - Evaluates current market valuation and momentum
+
+3. **Synthesis Phase**:
+   - Combines quantitative trends with qualitative insights
+   - Weighs management outlook against market positioning
+   - Generates confidence score based on data alignment
+
+4. **Forecast Generation**:
+   - Produces overall outlook (positive/neutral/negative)
+   - Generates investment recommendation (buy/hold/sell)
+   - Identifies key drivers from all three data sources
+   - Provides specific next-quarter predictions
+
+### Tool Integration Strategy
+
+**Data Source Priority**:
+- **Financial Metrics**: Provides quantitative foundation and trend analysis
+- **Management Insights**: Adds qualitative context and forward guidance
+- **Market Data**: Validates current positioning and investor sentiment
+
+**Confidence Scoring**:
+- **High (0.8+)**: All three sources align and provide clear signals
+- **Medium (0.5-0.8)**: Mixed signals requiring balanced interpretation  
+- **Low (0.0-0.5)**: Limited data or conflicting indicators
+
+**Error Handling**: Each tool operates independently, allowing the agent to generate forecasts even with partial data availability.
 
 ### System Design
 
